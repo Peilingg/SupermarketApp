@@ -3,7 +3,7 @@ const db = require('../db');
 const User = {
     // get all users (omit passwords in list)
     getAll: function(callback) {
-        const sql = 'SELECT id, username, email, address, contact, role FROM users';
+        const sql = 'SELECT userId, username, email, address, contact, role FROM users';
         db.query(sql, function(err, results) {
             return callback(err, results);
         });
@@ -11,7 +11,7 @@ const User = {
 
     // get a user by id (omit password)
     getById: function(id, callback) {
-        const sql = 'SELECT id, username, email, address, contact, role FROM users WHERE id = ?';
+        const sql = 'SELECT userId, username, email, address, contact, role FROM users WHERE userId = ?';
         db.query(sql, [id], function(err, results) {
             if (err) return callback(err);
             return callback(null, results[0] || null);
@@ -20,7 +20,7 @@ const User = {
 
     // authenticate user (email + plain password) -> returns full user row if ok (includes role & id)
     authenticate: function(email, password, callback) {
-        const sql = 'SELECT id, username, email, address, contact, role FROM users WHERE email = ? AND password = SHA1(?)';
+        const sql = 'SELECT userId, username, email, address, contact, role FROM users WHERE email = ? AND password = SHA1(?)';
         db.query(sql, [email, password], function(err, results) {
             if (err) return callback(err);
             return callback(null, results[0] || null);
@@ -47,8 +47,8 @@ const User = {
     update: function(id, user, callback) {
         // if password provided, hash here; else keep existing by passing current hashed pw directly
         const sql = user.password
-            ? 'UPDATE users SET username = ?, email = ?, password = SHA1(?), address = ?, contact = ?, role = ? WHERE id = ?'
-            : 'UPDATE users SET username = ?, email = ?, address = ?, contact = ?, role = ? WHERE id = ?';
+            ? 'UPDATE users SET username = ?, email = ?, password = SHA1(?), address = ?, contact = ?, role = ? WHERE userId = ?'
+            : 'UPDATE users SET username = ?, email = ?, address = ?, contact = ?, role = ? WHERE userId = ?';
 
         const params = user.password
             ? [user.username, user.email, user.password, user.address || null, user.contact || null, user.role || 'user', id]
@@ -69,7 +69,7 @@ const User = {
 
     // get products created/owned by a specific user
     getProducts: function(userId, callback) {
-        const sql = 'SELECT id, productName, quantity, price, image, user_id FROM products WHERE user_id = ?';
+        const sql = 'SELECT userId, productName, quantity, price, image, userId FROM products WHERE userId = ?';
         db.query(sql, [userId], function(err, results) {
             return callback(err, results);
         });
@@ -77,7 +77,7 @@ const User = {
 
     // check whether a user can manage products
     canManageProducts: function(userId, callback) {
-        const sql = 'SELECT role FROM users WHERE id = ?';
+        const sql = 'SELECT role FROM users WHERE userId = ?';
         db.query(sql, [userId], function(err, results) {
             if (err) return callback(err);
             const row = results[0];
