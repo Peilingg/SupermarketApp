@@ -141,7 +141,7 @@ app.post('/add-to-cart/:id', checkAuthenticated, async (req, res) => {
             console.error(err);
             return res.status(500).send('Error adding to cart');
         }
-        const productId = product.id;
+        const productId = product.productId;
         const qty = parseInt(req.body.quantity) || 1;
         if (!req.session.cart) req.session.cart = [];
 
@@ -149,7 +149,7 @@ app.post('/add-to-cart/:id', checkAuthenticated, async (req, res) => {
         if (existing) existing.quantity += qty;
         else {
             req.session.cart.push({
-                productId: product.id,
+                productId: product.productId,
                 productName: product.productName,
                 price: product.price,
                 quantity: qty,

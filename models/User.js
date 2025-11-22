@@ -61,7 +61,7 @@ const User = {
 
     // delete a user by id
     delete: function(id, callback) {
-        const sql = 'DELETE FROM users WHERE id = ?';
+        const sql = 'DELETE FROM users WHERE userId = ?';
         db.query(sql, [id], function(err, result) {
             return callback(err, result);
         });
@@ -69,7 +69,7 @@ const User = {
 
     // get products created/owned by a specific user
     getProducts: function(userId, callback) {
-        const sql = 'SELECT userId, productName, quantity, price, image, userId FROM products WHERE userId = ?';
+        const sql = 'SELECT productId, productName, quantity, price, image, userId FROM products WHERE userId = ?';
         db.query(sql, [userId], function(err, results) {
             return callback(err, results);
         });
