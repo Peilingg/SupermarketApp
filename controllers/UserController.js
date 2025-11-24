@@ -43,6 +43,25 @@ const UserController = {
         });
     },
 
+    // get own profile -> render profile.ejs
+    profile: function(req, res) {
+    const userId = req.session.userId;  // must exist
+    if (!userId) {
+        return res.redirect('/login'); // redirect if not logged in
+    }
+
+    User.getById(userId, function(err, user) {
+        if (err) {
+            return res.status(500).send("Database error");
+        }
+        if (!user) {
+            return res.status(404).send("User not found");
+        }
+
+        res.render('profile', { users: user });  // <-- pass user to EJS
+    });
+    },
+
     // add a new user (expects form data)
     add: function(req, res) {
         const user = {

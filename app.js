@@ -4,6 +4,7 @@ const flash = require('connect-flash');
 const multer = require('multer');
 const ProductController = require('./controllers/ProductController');
 const UserController = require('./controllers/UserController');
+const { checkAuthenticated, checkAdmin, validateRegistration } = require('./middleware');
 
 const app = express();
 
@@ -46,36 +47,6 @@ app.use((req, res, next) => {
     next();
 });
 
-// Middleware to check if user is logged in
-const checkAuthenticated = (req, res, next) => {
-    if (req.session.user) return next();
-    req.flash('error', 'Please log in to view this resource');
-    res.redirect('/login');
-};
-
-// Middleware to check if user is admin
-const checkAdmin = (req, res, next) => {
-    if (req.session.user && req.session.user.role === 'admin') return next();
-    req.flash('error', 'Access denied');
-    res.redirect('/shopping');
-};
-
-// Middleware for form validation
-const validateRegistration = (req, res, next) => {
-    const { username, email, password, address, contact, role } = req.body;
-    if (!username || !email || !password || !address || !contact || !role) {
-        req.flash('error', 'All fields are required.');
-        req.flash('formData', req.body);
-        return res.redirect('/register');
-    }
-    if (password.length < 6) {
-        req.flash('error', 'Password should be at least 6 or more characters long');
-        req.flash('formData', req.body);
-        return res.redirect('/register');
-    }
-    next();
-};
-
 // Routes ------------------------------------------------------------------
 
 // Home
@@ -107,6 +78,8 @@ app.get('/addProduct', checkAuthenticated, checkAdmin, (req, res) => {
 app.post('/addProduct', checkAuthenticated, checkAdmin, upload.single('image'), (req, res) => {
     // map incoming form fields used by previous views to the controller/model field names
     if (req.body.name) req.body.productName = req.body.name;
+    // Map category - this is the missing line!
+    if (req.body.category) req.body.category = req.body.category;
     // attach owner user id for FK linking
     if (req.session.user && req.session.user.id) req.body.user_id = req.session.user.id;
     ProductController.add(req, res);
@@ -121,6 +94,8 @@ app.get('/updateProduct/:id', checkAuthenticated, checkAdmin, (req, res) => {
 // Update product POST (admin)
 app.post('/updateProduct/:id', checkAuthenticated, checkAdmin, upload.single('image'), (req, res) => {
     if (req.body.name) req.body.productName = req.body.name;
+    // Map category - this is the missing line!
+    if (req.body.category) req.body.category = req.body.category;
     // preserve/attach user_id in case controller/model uses it
     if (req.session.user && req.session.user.id) req.body.user_id = req.session.user.id;
     ProductController.update(req, res);
@@ -141,7 +116,7 @@ app.post('/add-to-cart/:id', checkAuthenticated, async (req, res) => {
             console.error(err);
             return res.status(500).send('Error adding to cart');
         }
-        const productId = product.productId;
+        const productId = product.productd;
         const qty = parseInt(req.body.quantity) || 1;
         if (!req.session.cart) req.session.cart = [];
 
@@ -152,6 +127,7 @@ app.post('/add-to-cart/:id', checkAuthenticated, async (req, res) => {
                 productId: product.productId,
                 productName: product.productName,
                 price: product.price,
+                category: product.category,
                 quantity: qty,
                 image: product.image
             });
@@ -191,6 +167,11 @@ app.post('/login', (req, res) => {
 // Logout
 app.get('/logout', (req, res) => {
     req.session.destroy(() => res.redirect('/'));
+});
+
+// Profile (view own profile)
+app.get('/profile', checkAuthenticated, (req, res) => {
+    UserController.profile(req, res);
 });
 
 // Users listing (admin)

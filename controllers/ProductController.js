@@ -70,6 +70,7 @@ const ProductController = {
             productName: req.body.productName,
             quantity: req.body.quantity,
             price: req.body.price,
+            category: req.body.category,
             image: image,
             user_id: req.body.user_id || (req.session.user && req.session.user.id) || null
         };
@@ -91,6 +92,7 @@ const ProductController = {
             productName: req.body.productName,
             quantity: req.body.quantity,
             price: req.body.price,
+            category: req.body.category,
             image: image,
             user_id: req.body.user_id || (req.session.user && req.session.user.id) || null
         };
