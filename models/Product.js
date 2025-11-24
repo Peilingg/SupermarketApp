@@ -13,13 +13,13 @@ const Product = {
 
     add: function(product, callback) {
         const sql = 'INSERT INTO products (productName, quantity, price, image, category) VALUES (?, ?, ?, ?, ?)';
-        const params = [product.productName, product.quantity, product.price, product.image, product.category];
+        const params = [product.productName, product.quantity, product.price, product.image, product.category || null];
         db.query(sql, params, function(err, result) { return callback(err, result); });
     },
 
     update: function(id, product, callback) {
         const sql = 'UPDATE products SET productName = ?, quantity = ?, price = ?, image = ?, category = ? WHERE productId = ?';
-        const params = [product.productName, product.quantity, product.price, product.image, product.category, id];
+        const params = [product.productName, product.quantity, product.price, product.image, product.category || null, id];
         db.query(sql, params, function(err, result) { return callback(err, result); });
     },
 

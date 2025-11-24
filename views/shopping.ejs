@@ -20,6 +20,18 @@
       height: 200px;
       object-fit: contain;
     }
+
+    /* Center select value */
+    .quantity-wrap { display:flex; justify-content:center; }
+    .quantity-select {
+      text-align: center;
+      text-align-last: center; /* Firefox */
+      -moz-text-align-last: center;
+      -webkit-appearance: none;
+      appearance: none;
+      max-width: 110px;
+      margin: 0 auto;
+    }
   </style>
 </head>
 <body>
@@ -30,13 +42,18 @@
           <span class="navbar-toggler-icon"></span>
         </button>
         <div class="collapse navbar-collapse" id="collapsibleNavbar">
-          <ul class="navbar-nav">
+          <ul class="navbar-nav ms-auto">
             <li class="nav-item">
               <a class="nav-link" href="/cart">View Cart</a>
             </li> 
             <li class="nav-item">
+              <a class="nav-link" href="/profile">
+                <img src="/images/profile.png" alt="Profile" width="24" class="rounded-circle"> Profile
+              </a>
+            </li>
+            <li class="nav-item">
               <a class="nav-link" href="/logout">Logout</a>
-            </li> 
+            </li>
           </ul>
         </div>
       </div>
@@ -59,15 +76,17 @@
               <p class="card-text"><strong>Price:</strong> $<%= products[i].price.toFixed(2) %></p>
               <p class="card-text"><strong>Category:</strong> <%= products[i].category %></p>
 
-              <select class="form-control" onchange="document.getElementById('quantity-<%= products[i].productId %>').value = this.value">
-                <% for (let q = 1; q <= 5; q++) { %>
-                  <option value="<%= q %>"><%= q %></option>
-                <% } %>
-              </select>
+              <div class="quantity-wrap mt-2">
+                <select class="form-select quantity-select" onchange="document.getElementById('quantity-<%= products[i].productId %>').value = this.value">
+                  <% for (let q = 1; q <= products[i].quantity; q++) { %>
+                    <option value="<%= q %>"><%= q %></option>
+                  <% } %>
+                </select>
+              </div>
 
-              <form action="/add-to-cart/<%= products[i].productId %>" method="POST">
+              <form action="/add-to-cart/<%= products[i].productId %>" method="POST" class="text-center mt-2">
                   <input type="hidden" name="quantity" id="quantity-<%= products[i].productId %>" value="1">
-                  <button type="submit" class="btn btn-primary mt-3">Buy</button>
+                  <button type="submit" class="btn btn-primary">Buy</button>
               </form>
             </div>
           </div>

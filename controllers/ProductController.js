@@ -1,13 +1,17 @@
 const Product = require('../models/Product');
 
+// simple categories list — adjust to match your app or replace with DB-driven list
+const CATEGORIES = ['Grocery', 'Beverages', 'Household', 'Personal Care', 'Other'];
+
 const ProductController = {
     // list all products for inventory (admin view)
     listAll: function(req, res) {
         Product.getAll(function(err, products) {
             if (err) {
-                console.error(err);
+                console.error('ProductController.listAll - DB error:', err);
                 return res.status(500).render('inventory', { products: [], error: 'Database error' });
             }
+            console.log('ProductController.listAll - products returned:', Array.isArray(products) ? products.length : typeof products);
             return res.render('inventory', { products, error: null });
         });
     },
@@ -16,9 +20,10 @@ const ProductController = {
     listForShopping: function(req, res) {
         Product.getAll(function(err, products) {
             if (err) {
-                console.error(err);
+                console.error('ProductController.listForShopping - DB error:', err);
                 return res.status(500).render('shopping', { products: [], error: 'Database error' });
             }
+            console.log('ProductController.listForShopping - products returned:', Array.isArray(products) ? products.length : typeof products);
             return res.render('shopping', { products, error: null });
         });
     },
@@ -27,13 +32,8 @@ const ProductController = {
     getById: function(req, res) {
         const id = req.params.id;
         Product.getById(id, function(err, product) {
-            if (err) {
-                console.error(err);
-                return res.status(500).render('product', { product: null, error: 'Database error' });
-            }
-            if (!product) {
-                return res.status(404).render('product', { product: null, error: 'Product not found' });
-            }
+            if (err) { console.error(err); return res.status(500).render('product', { product: null, error: 'Database error' }); }
+            if (!product) return res.status(404).render('product', { product: null, error: 'Product not found' });
             return res.render('product', { product, error: null });
         });
     },
@@ -52,34 +52,36 @@ const ProductController = {
     getForEdit: function(req, res) {
         const id = req.params.id;
         Product.getById(id, function(err, product) {
-            if (err) {
-                console.error(err);
-                return res.status(500).render('updateProduct', { product: null, error: 'Database error' });
-            }
-            if (!product) {
-                return res.status(404).render('updateProduct', { product: null, error: 'Product not found' });
-            }
-            return res.render('updateProduct', { product });
+            if (err) { console.error(err); return res.status(500).render('updateProduct', { product: null, categories: CATEGORIES, error: 'Database error' }); }
+            if (!product) return res.status(404).render('updateProduct', { product: null, categories: CATEGORIES, error: 'Product not found' });
+            return res.render('updateProduct', { product, categories: CATEGORIES, error: null });
         });
     },
 
     // add a new product
     add: function(req, res) {
+        // multer file is in req.file; form fields in req.body
+        console.log('ProductController.add - req.body:', req.body);
+        console.log('ProductController.add - req.file:', req.file && req.file.filename);
+
         const image = req.file ? req.file.filename : (req.body.image || null);
         const product = {
             productName: req.body.productName,
             quantity: req.body.quantity,
             price: req.body.price,
-            category: req.body.category,
+            category: req.body.category || null,
             image: image,
-            user_id: req.body.user_id || (req.session.user && req.session.user.id) || null
+            userId: req.body.userId || (req.session.user && req.session.user.userId) || null
         };
 
         Product.add(product, function(err, result) {
             if (err) {
-                console.error(err);
-                return res.status(500).render('addProduct', { product, error: 'Failed to add product' });
+                console.error('ProductController.add - DB error:', err);
+                // render same form so user can correct; pass categories to populate dropdown
+                return res.status(500).render('addProduct', { product, categories: CATEGORIES, error: 'Failed to add product' });
             }
+            console.log('ProductController.add - insert OK, insertId:', result && result.insertId);
+            // success -> redirect to inventory
             return res.redirect('/inventory');
         });
     },
@@ -92,17 +94,13 @@ const ProductController = {
             productName: req.body.productName,
             quantity: req.body.quantity,
             price: req.body.price,
-            category: req.body.category,
+            category: req.body.category || null,
             image: image,
-            user_id: req.body.user_id || (req.session.user && req.session.user.id) || null
+            userId: req.body.userId || (req.session.user && req.session.user.userId) || null
         };
 
         Product.update(id, product, function(err, result) {
-            if (err) {
-                console.error(err);
-                product.id = id;
-                return res.status(500).render('updateProduct', { product, error: 'Failed to update product' });
-            }
+            if (err) { console.error('ProductController.update -', err); product.productId = id; return res.status(500).render('updateProduct', { product, categories: CATEGORIES, error: 'Failed to update product' }); }
             return res.redirect('/inventory');
         });
     },
@@ -111,10 +109,7 @@ const ProductController = {
     delete: function(req, res) {
         const id = req.params.id;
         Product.delete(id, function(err, result) {
-            if (err) {
-                console.error(err);
-                return res.status(500).render('inventory', { products: [], error: 'Failed to delete product' });
-            }
+            if (err) { console.error('ProductController.delete -', err); return res.status(500).render('inventory', { products: [], error: 'Failed to delete product' }); }
             return res.redirect('/inventory');
         });
     }

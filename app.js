@@ -69,35 +69,39 @@ app.get('/product/:id', checkAuthenticated, (req, res) => {
     ProductController.getById(req, res);
 });
 
-// Add product - render form (admin)
+// categories list (keep in sync with controller if you want)
+const CATEGORIES = ['Grocery', 'Beverages', 'Household', 'Personal Care', 'Other'];
+
+// Add product form (admin) - render with categories
 app.get('/addProduct', checkAuthenticated, checkAdmin, (req, res) => {
-    res.render('addProduct');
+    res.render('addProduct', { categories: CATEGORIES, product: null, error: null });
 });
 
-// Add product - POST (admin) - handle upload and map form fields to controller expectations
+// Add product - POST (admin)
 app.post('/addProduct', checkAuthenticated, checkAdmin, upload.single('image'), (req, res) => {
-    // map incoming form fields used by previous views to the controller/model field names
+    // map front-end names to controller/model fields (keep UI unchanged)
     if (req.body.name) req.body.productName = req.body.name;
-    // Map category - this is the missing line!
-    if (req.body.category) req.body.category = req.body.category;
-    // attach owner user id for FK linking
-    if (req.session.user && req.session.user.id) req.body.user_id = req.session.user.id;
+    // normalize numeric fields
+    if (req.body.quantity) req.body.quantity = parseInt(req.body.quantity, 10) || 0;
+    if (req.body.price) req.body.price = parseFloat(req.body.price) || 0;
+    // ensure category flows through
+    req.body.category = req.body.category || null;
+    // attach owner user id for FK linking if session has userId
+    if (req.session.user && req.session.user.userId) req.body.userId = req.session.user.userId;
+    // forward to controller
     ProductController.add(req, res);
 });
 
 // Update product form (admin)
 app.get('/updateProduct/:id', checkAuthenticated, checkAdmin, (req, res) => {
-    // controller will render the edit form
-    ProductController.getForEdit(req, res);
+    ProductController.getForEdit(req, res); // controller passes categories
 });
 
 // Update product POST (admin)
 app.post('/updateProduct/:id', checkAuthenticated, checkAdmin, upload.single('image'), (req, res) => {
     if (req.body.name) req.body.productName = req.body.name;
-    // Map category - this is the missing line!
     if (req.body.category) req.body.category = req.body.category;
-    // preserve/attach user_id in case controller/model uses it
-    if (req.session.user && req.session.user.id) req.body.user_id = req.session.user.id;
+    if (req.session.user && req.session.user.userId) req.body.userId = req.session.user.userId;
     ProductController.update(req, res);
 });
 
@@ -107,16 +111,11 @@ app.get('/deleteProduct/:id', checkAuthenticated, checkAdmin, (req, res) => {
 });
 
 // Cart routes (adds to session cart). Use Product model via controller helper to fetch product data (controller returns/render).
-// We'll call a lightweight controller helper that returns product data in req (fetchForCart).
-app.post('/add-to-cart/:id', checkAuthenticated, async (req, res) => {
-    // ProductController.fetchForCart will send product JSON via res.locals._product or handle redirect on error.
-    // For simplicity call a controller helper that returns a product via callback style
+// We'll call a lightweight controller helper that returns a product via callback style
+app.post('/add-to-cart/:id', checkAuthenticated, (req, res) => {
     ProductController.fetchForCart(req, res, function(err, product) {
-        if (err) {
-            console.error(err);
-            return res.status(500).send('Error adding to cart');
-        }
-        const productId = product.productd;
+        if (err) { console.error(err); return res.status(500).send('Error adding to cart'); }
+        const productId = product.productId;
         const qty = parseInt(req.body.quantity) || 1;
         if (!req.session.cart) req.session.cart = [];
 
@@ -174,6 +173,15 @@ app.get('/profile', checkAuthenticated, (req, res) => {
     UserController.profile(req, res);
 });
 
+// Profile edit (current user)
+app.get('/profile/edit', checkAuthenticated, (req, res) => {
+    UserController.getForEditProfile(req, res);
+});
+
+app.post('/profile/edit', checkAuthenticated, (req, res) => {
+    UserController.updateProfile(req, res);
+});
+
 // Users listing (admin)
 app.get('/users', checkAuthenticated, checkAdmin, (req, res) => {
     UserController.listAll(req, res);
@@ -193,6 +201,11 @@ app.get('/users/:id/edit', checkAuthenticated, checkAdmin, (req, res) => {
 // Update user (admin)
 app.post('/users/:id', checkAuthenticated, checkAdmin, (req, res) => {
     UserController.update(req, res);
+});
+
+// Delete user (admin)
+app.get('/users/:id/delete', checkAuthenticated, checkAdmin, (req, res) => {
+    UserController.delete(req, res);
 });
 
 // Delete user (admin)

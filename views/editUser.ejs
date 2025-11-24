@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <title>Edit Profile</title>
+</head>
+<body>
+  <%- include('partials/navbar') %>
+
+  <div class="container my-5" style="max-width:720px;">
+    <h3>Edit Profile</h3>
+
+    <% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
+
+    <form action="<%= action %>" method="post" class="mt-3">
+      <div class="mb-3">
+        <label class="form-label">Full name</label>
+        <input name="username" class="form-control" value="<%= user ? user.username : '' %>" required />
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Email</label>
+        <input name="email" type="email" class="form-control" value="<%= user ? user.email : '' %>" required />
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Address</label>
+        <input name="address" class="form-control" value="<%= user ? user.address : '' %>" />
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">Contact</label>
+        <input name="contact" class="form-control" value="<%= user ? user.contact : '' %>" />
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label">New Password (leave blank to keep current)</label>
+        <input name="password" type="password" class="form-control" />
+      </div>
+
+      <% if (isAdmin) { %>
+        <div class="mb-3">
+          <label class="form-label">Role</label>
+          <select name="role" class="form-control">
+            <option value="user" <%= user && user.role==='user' ? 'selected' : '' %>>user</option>
+            <option value="admin" <%= user && user.role==='admin' ? 'selected' : '' %>>admin</option>
+          </select>
+        </div>
+      <% } %>
+
+      <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-primary">Save</button>
+        <a href="/profile" class="btn btn-secondary">Cancel</a>
+      </div>
+    </form>
+  </div>
+</body>
+</html>
