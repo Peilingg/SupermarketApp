@@ -4,6 +4,7 @@ const flash = require('connect-flash');
 const multer = require('multer');
 const ProductController = require('./controllers/ProductController');
 const UserController = require('./controllers/UserController');
+const CartItemController = require('./controllers/CartItemController');
 const { checkAuthenticated, checkAdmin, validateRegistration } = require('./middleware');
 
 const app = express();
@@ -24,7 +25,8 @@ app.set('view engine', 'ejs');
 // enable static files
 app.use(express.static('public'));
 // enable form processing
-app.use(express.urlencoded({ extended: false }));
+app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 
 // Session & flash
 app.use(session({
@@ -138,6 +140,17 @@ app.post('/add-to-cart/:id', checkAuthenticated, (req, res) => {
 app.get('/cart', checkAuthenticated, (req, res) => {
     const cart = req.session.cart || [];
     res.render('cart', { cart });
+});
+
+// Cart routes
+app.post('/cart/add/:id', checkAuthenticated, (req, res) => CartItemController.add(req, res));
+app.get('/cart', checkAuthenticated, (req, res) => CartItemController.listAll(req, res));
+app.post('/cart/update/:id', checkAuthenticated, (req, res) => CartItemController.update(req, res));
+app.post('/cart/remove/:id', checkAuthenticated, (req, res) => CartItemController.remove(req, res));
+app.post('/cart/clear', checkAuthenticated, (req, res) => CartItemController.clear(req, res));
+app.post('/cart/checkout', checkAuthenticated, (req, res) => {
+  // keep simple: render/handle checkout; for now redirect to /cart or implement checkout
+  return res.redirect('/cart');
 });
 
 // User routes --------------------------------------------------------------

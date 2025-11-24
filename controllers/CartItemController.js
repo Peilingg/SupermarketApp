@@ -1,109 +1,174 @@
 const CartItem = require('../models/CartItem');
 
+function wantsJson(req) {
+  return req.xhr || (req.headers.accept || '').includes('application/json');
+}
+
 const CartItemController = {
-  // render cart page with items and subtotal
-  listAll: function(req, res) {
-    const sessionUser = req.session.user || null;
+  // GET /cart
+  listAll: function (req, res) {
+    const sessionUser = req.session && req.session.user;
     if (!sessionUser || !sessionUser.userId) return res.redirect('/login');
 
     const userId = sessionUser.userId;
     CartItem.listAll(userId, (err, items) => {
       if (err) {
-        console.error('CartItemController.listAll -', err);
-        return res.status(500).render('cart', { items: [], subtotal: 0, error: 'Failed to load cart' });
+        console.error('CartItemController.listAll', err);
+        return res.status(500).render('cart', { items: [], subtotal: 0, error: 'Failed to load cart', cartItems: [] });
       }
 
-      CartItem.subtotal(userId, (err2, subtotal) => {
-        if (err2) {
-          console.error('CartItemController.subtotal -', err2);
-          return res.status(500).render('cart', { items, subtotal: 0, error: 'Failed to calculate subtotal' });
-        }
+      // remove any undefined/null entries before rendering
+      items = Array.isArray(items) ? items.filter(Boolean) : [];
 
-        return res.render('cart', { items, subtotal, error: null });
+      CartItem.subtotal(userId, (sErr, subtotal) => {
+        if (sErr) {
+          console.error('CartItemController.subtotal', sErr);
+          subtotal = 0;
+        }
+        return res.render('cart', { items: items, subtotal: subtotal || 0, error: null, cartItems: items });
       });
     });
   },
 
-  // add a product to user's cart (increments if exists)
-  add: function(req, res) {
-    const sessionUser = req.session.user || null;
-    if (!sessionUser || !sessionUser.userId) return res.status(401).redirect('/login');
+  // POST /cart/add/:id
+  add: function (req, res) {
+    const sessionUser = req.session && req.session.user;
+    if (!sessionUser || !sessionUser.userId) {
+      if (wantsJson(req)) return res.status(401).json({ error: 'Not authenticated' });
+      return res.redirect('/login');
+    }
 
     const userId = sessionUser.userId;
     const productId = req.params.id || req.body.productId;
     const qty = parseInt(req.body.quantity || req.query.quantity || 1, 10) || 1;
 
     if (!productId) {
-      return res.status(400).redirect('/shopping');
+      if (wantsJson(req)) return res.status(400).json({ error: 'Missing product id' });
+      return res.redirect('/shopping');
     }
 
     CartItem.add(userId, productId, qty, (err) => {
       if (err) {
-        console.error('CartItemController.add -', err);
-        // keep user on shopping page with an error message if flash present
-        if (req.flash) { req.flash('error', 'Failed to add to cart'); }
+        console.error('CartItemController.add', err);
+        if (wantsJson(req)) return res.status(500).json({ error: 'Failed to add to cart' });
         return res.redirect('/shopping');
       }
+      if (wantsJson(req)) return res.json({ ok: true, redirect: '/cart' });
       return res.redirect('/cart');
     });
   },
 
-  // update an existing cart item quantity
-  update: function(req, res) {
+  // POST /cart/update/:id
+  update: function (req, res) {
+    const sessionUser = req.session && req.session.user;
+    if (!sessionUser || !sessionUser.userId) return wantsJson(req) ? res.status(401).json({ error: 'Not authenticated' }) : res.redirect('/login');
+
     const cartItemsId = req.params.id || req.body.cart_itemsId;
     const qty = parseInt(req.body.quantity, 10);
-    if (!cartItemsId || isNaN(qty)) return res.status(400).redirect('/cart');
-
-    CartItem.update(cartItemsId, qty, (err) => {
-      if (err) {
-        console.error('CartItemController.update -', err);
-        if (req.flash) req.flash('error', 'Failed to update cart');
-      }
+    if (!cartItemsId || isNaN(qty) || qty < 0) {
+      if (wantsJson(req)) return res.status(400).json({ error: 'Invalid input' });
       return res.redirect('/cart');
+    }
+
+    CartItem.updateQuantity(cartItemsId, qty, (err, updatedLine) => {
+      if (err) {
+        console.error('CartItemController.update', err);
+        if (wantsJson(req)) return res.status(500).json({ error: 'Failed to update' });
+        return res.redirect('/cart');
+      }
+
+      // recompute subtotal and return JSON for AJAX or redirect
+      CartItem.subtotal(sessionUser.userId, (sErr, subtotal) => {
+        if (sErr) {
+          console.error('CartItemController.update -> subtotal', sErr);
+          subtotal = 0;
+        }
+
+        if (wantsJson(req)) {
+          return res.json({
+            cart_itemsId: cartItemsId,
+            quantity: qty,
+            lineTotal: updatedLine ? Number(updatedLine.lineTotal || (updatedLine.price * updatedLine.quantity)) : 0,
+            subtotal: Number(subtotal || 0)
+          });
+        }
+        return res.redirect('/cart');
+      });
     });
   },
 
-  // remove a single cart item
-  remove: function(req, res) {
+  // POST /cart/remove/:id
+  remove: function (req, res) {
+    const sessionUser = req.session && req.session.user;
+    if (!sessionUser || !sessionUser.userId) return wantsJson(req) ? res.status(401).json({ error: 'Not authenticated' }) : res.redirect('/login');
+
     const cartItemsId = req.params.id || req.body.cart_itemsId;
-    if (!cartItemsId) return res.status(400).redirect('/cart');
+    if (!cartItemsId) {
+      if (wantsJson(req)) return res.status(400).json({ error: 'Invalid input' });
+      return res.redirect('/cart');
+    }
 
     CartItem.remove(cartItemsId, (err) => {
       if (err) {
-        console.error('CartItemController.remove -', err);
-        if (req.flash) req.flash('error', 'Failed to remove item');
+        console.error('CartItemController.remove', err);
+        if (wantsJson(req)) return res.status(500).json({ error: 'Failed to remove item' });
+        return res.redirect('/cart');
       }
-      return res.redirect('/cart');
+
+      // recompute subtotal
+      CartItem.subtotal(sessionUser.userId, (sErr, subtotal) => {
+        if (sErr) {
+          console.error('CartItemController.remove -> subtotal', sErr);
+          subtotal = 0;
+        }
+        if (wantsJson(req)) return res.json({ removedId: cartItemsId, subtotal: Number(subtotal || 0) });
+        return res.redirect('/cart');
+      });
     });
   },
 
-  // clear all cart items for current user
-  clear: function(req, res) {
-    const sessionUser = req.session.user || null;
-    if (!sessionUser || !sessionUser.userId) return res.redirect('/login');
+  // POST /cart/clear
+  clear: function (req, res) {
+    const sessionUser = req.session && req.session.user;
+    if (!sessionUser || !sessionUser.userId) return wantsJson(req) ? res.status(401).json({ error: 'Not authenticated' }) : res.redirect('/login');
 
-    const userId = sessionUser.userId;
-    CartItem.clear(userId, (err) => {
+    CartItem.clear(sessionUser.userId, (err) => {
       if (err) {
-        console.error('CartItemController.clear -', err);
-        if (req.flash) req.flash('error', 'Failed to clear cart');
+        console.error('CartItemController.clear', err);
+        if (wantsJson(req)) return res.status(500).json({ error: 'Failed to clear cart' });
+        return res.redirect('/cart');
       }
+      if (wantsJson(req)) return res.json({ cleared: true, subtotal: 0 });
       return res.redirect('/cart');
     });
   },
 
-  // return subtotal as JSON (useful for AJAX)
-  subtotal: function(req, res) {
-    const sessionUser = req.session.user || null;
+  // GET /cart/subtotal  (returns JSON)
+  subtotal: function (req, res) {
+    const sessionUser = req.session && req.session.user;
     if (!sessionUser || !sessionUser.userId) return res.status(401).json({ error: 'Not authenticated' });
 
-    const userId = sessionUser.userId;
-    CartItem.subtotal(userId, (err, subtotal) => {
+    CartItem.subtotal(sessionUser.userId, (err, subtotal) => {
       if (err) {
-        console.error('CartItemController.subtotal (api) -', err);
+        console.error('CartItemController.subtotal', err);
         return res.status(500).json({ error: 'Failed to calculate subtotal' });
       }
-      return res.json({ subtotal });
+      return res.json({ subtotal: Number(subtotal || 0) });
+    });
+  },
+
+  // GET /cart/total?tax=0.07  (returns JSON with subtotal/tax/total)
+  total: function (req, res) {
+    const sessionUser = req.session && req.session.user;
+    if (!sessionUser || !sessionUser.userId) return res.status(401).json({ error: 'Not authenticated' });
+
+    const taxRate = parseFloat(req.query.tax || req.body.tax || 0) || 0;
+    CartItem.total(sessionUser.userId, taxRate, (err, totals) => {
+      if (err) {
+        console.error('CartItemController.total', err);
+        return res.status(500).json({ error: 'Failed to calculate total' });
+      }
+      return res.json(totals);
     });
   }
 };
