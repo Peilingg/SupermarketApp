@@ -21,10 +21,27 @@ const ProductController = {
         Product.getAll(function(err, products) {
             if (err) {
                 console.error('ProductController.listForShopping - DB error:', err);
-                return res.status(500).render('shopping', { products: [], error: 'Database error' });
+                req.flash('error', 'Unable to load products.');
+                return res.redirect('/');
             }
-            console.log('ProductController.listForShopping - products returned:', Array.isArray(products) ? products.length : typeof products);
-            return res.render('shopping', { products, error: null });
+
+            // build unique categories
+            const categories = Array.from(new Set((products || []).map(p => p.category).filter(Boolean)));
+
+            // selected category comes from query (form should submit as GET)
+            const selectedCategory = (req.query.category || '').toString();
+
+            // apply filter if selectedCategory provided
+            const filteredProducts = selectedCategory
+                ? (products || []).filter(p => ((p.category || '').toString() === selectedCategory))
+                : products;
+
+            return res.render('shopping', {
+                user: req.session.user || null,
+                products: filteredProducts || [],
+                categories,
+                selectedCategory
+            });
         });
     },
 

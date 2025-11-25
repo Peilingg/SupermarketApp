@@ -15,12 +15,27 @@
     }
     .card {
       transition: all 0.3s ease;
+      position: relative; /* allow absolute-positioned fav button */
     }
     .card img {
       height: 200px;
       object-fit: contain;
     }
 
+    /* Favourite (heart) button */
+    .fav-form { position: absolute; top: 8px; right: 8px; z-index: 10; margin: 0; padding: 0; }
+    .fav-btn {
+      border: none;
+      background: transparent;
+      font-size: 22px;
+      line-height: 1;
+      color: #ccc;
+      cursor: pointer;
+      padding: 4px;
+      border-radius: 4px;
+    }
+    .fav-btn:hover { color: #e74c3c; transform: scale(1.05); }
+    .fav-btn:focus { outline: none; }
     /* Center select value */
     .quantity-wrap { display:flex; justify-content:center; }
     .quantity-select {
@@ -44,6 +59,9 @@
         <div class="collapse navbar-collapse" id="collapsibleNavbar">
           <ul class="navbar-nav ms-auto">
             <li class="nav-item">
+              <a class="nav-link" href="/favourite">View Favourites</a>
+            </li> 
+            <li class="nav-item">
               <a class="nav-link" href="/cart">View Cart</a>
             </li> 
             <li class="nav-item">
@@ -60,18 +78,43 @@
     </nav>
 
   <div class="container mt-4">
-    <p>Welcome, <%= user.username %> (<%= user.role %>)</p>
+    <p>Welcome, <%= user ? user.username : 'Guest' %> <%= user ? '(' + user.role + ')' : '' %></p>
     <div class="text-center mb-4"><h2>Products from Supermarket App Database</h2></div>
 
+    <!-- Category filter -->
+    <form class="row g-3 mb-4" method="GET" action="/filteredProduct">
+      <div class="col-md-4">
+        <label for="category" class="form-label">Filter by Category</label>
+        <select id="category" name="category" class="form-select" onchange="this.form.submit()">
+          <option value="">All categories</option>
+          <% if (Array.isArray(categories)) { %>
+            <% categories.forEach(function(cat) { %>
+              <option value="<%= cat %>" <%= (selectedCategory === cat) ? 'selected' : '' %>><%= cat %></option>
+            <% }) %>
+          <% } %>
+        </select>
+      </div>
+      <noscript>
+        <div class="col-md-4 d-flex align-items-end">
+          <button type="submit" class="btn btn-outline-primary w-100">Filter</button>
+        </div>
+      </noscript>
+    </form>
+    
     <div class="row g-4">
       <% for(let i=0; i < products.length; i++) { %>
         <div class="col-sm-6 col-md-4 col-lg-3">
           <div class="card h-100 text-center shadow-sm">
             <img src="/images/<%= products[i].image %>" class="card-img-top p-3" style="height:200px; object-fit:contain;">
             <div class="card-body">
-              <h5 class="card-title">
-                <a href="/product/<%= products[i].productId %>"><%= products[i].productName %></a>
-              </h5>
+              <!-- favourite button (posts productId to /favourites/add) -->
+              <form action="/favourites/add" method="POST" class="fav-form fav-ajax" aria-label="Add to favourites">
+                <input type="hidden" name="productId" value="<%= products[i].productId %>">
+                <button type="submit" class="fav-btn" title="Add to favourites">♡</button>
+              </form>
+               <h5 class="card-title">
+                 <a href="/product/<%= products[i].productId %>"><%= products[i].productName %></a>
+               </h5>
               <p class="card-text"><strong>Quantity:</strong> <%= products[i].quantity %></p>
               <p class="card-text"><strong>Price:</strong> $<%= products[i].price.toFixed(2) %></p>
               <p class="card-text"><strong>Category:</strong> <%= products[i].category %></p>
@@ -95,5 +138,42 @@
     </div>
   </div>
 
+<script>
+document.addEventListener('DOMContentLoaded', function(){
+  document.querySelectorAll('form.fav-ajax').forEach(function(form){
+    form.addEventListener('submit', function(e){
+      e.preventDefault();
+      const fd = new FormData(form);
+      // convert FormData -> URLSearchParams so express.urlencoded can parse it
+      const params = new URLSearchParams();
+      for (const pair of fd.entries()) params.append(pair[0], pair[1]);
+
+      fetch(form.action, {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'
+        },
+        body: params.toString(),
+        credentials: 'same-origin'
+      })
+      .then(response => {
+        if (!response.ok) return response.text().then(t => Promise.reject(t || 'Server error'));
+        // on success, redirect to the favourites page
+        window.location.href = '/favourites';
+      })
+      .catch(err => {
+        console.error('Fav add error:', err);
+        const alertEl = document.createElement('div');
+        alertEl.className = 'position-fixed top-0 end-0 m-3 alert alert-danger';
+        alertEl.style.zIndex = 1200;
+        alertEl.textContent = (typeof err === 'string' ? err : 'Network or server error');
+        document.body.appendChild(alertEl);
+        setTimeout(()=> alertEl.remove(), 3500);
+      });
+    });
+  });
+});
+</script>
 </body>
 </html>

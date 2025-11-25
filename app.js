@@ -6,6 +6,7 @@ const ProductController = require('./controllers/ProductController');
 const UserController = require('./controllers/UserController');
 const CartItemController = require('./controllers/CartItemController');
 const { checkAuthenticated, checkAdmin, validateRegistration } = require('./middleware');
+const FavouriteController = require('./controllers/FavouriteController');
 
 const app = express();
 
@@ -25,7 +26,7 @@ app.set('view engine', 'ejs');
 // enable static files
 app.use(express.static('public'));
 // enable form processing
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true })); // parse form POST bodies
 app.use(express.json());
 
 // Session & flash
@@ -62,8 +63,16 @@ app.get('/inventory', checkAuthenticated, checkAdmin, (req, res) => {
 });
 
 // Shopping (all authenticated users) - list products via controller, render shopping.ejs
-app.get('/shopping', checkAuthenticated, (req, res) => {
-    ProductController.listForShopping(req, res);
+app.get('/shopping', checkAuthenticated, ProductController.listForShopping);
+
+// Redirects for category filtering
+app.get('/filteredProduct', (req, res) => {
+  const category = req.query.category || '';
+  res.redirect('/shopping' + (category ? ('?category=' + encodeURIComponent(category)) : ''));
+});
+app.post('/filteredProduct', (req, res) => {
+  const category = req.body.category || '';
+  res.redirect('/shopping' + (category ? ('?category=' + encodeURIComponent(category)) : ''));
 });
 
 // Single product view
@@ -71,8 +80,26 @@ app.get('/product/:id', checkAuthenticated, (req, res) => {
     ProductController.getById(req, res);
 });
 
-// categories list (keep in sync with controller if you want)
-const CATEGORIES = ['Grocery', 'Beverages', 'Household', 'Personal Care', 'Other'];
+// ------------------ Favourites routes (MVC) ------------------
+// List current user's favourites
+app.get('/favourites', checkAuthenticated, FavouriteController.listByUser);
+
+// alias for singular path used in your nav/link
+app.get('/favourite', checkAuthenticated, FavouriteController.listByUser);
+
+// add POST alias if some forms post to singular path
+app.post('/favourite/add', checkAuthenticated, FavouriteController.add);
+app.post('/favourites/add', checkAuthenticated, FavouriteController.add); // alias for singular form POSTs
+
+// Remove favourite by favouriteId (POST)
+app.post('/favourites/remove/:id', checkAuthenticated, FavouriteController.remove);
+
+// Optional alias so GET /favourites/remove/:id won't 404 (use only if needed)
+app.get('/favourites/remove/:id', checkAuthenticated, FavouriteController.remove);
+
+// Remove favourite by userId + productId (toggle) - accepts JSON/form body
+app.post('/favourites/removeByProduct', checkAuthenticated, FavouriteController.removeByUserProduct);
+
 
 // Add product form (admin) - render with categories
 app.get('/addProduct', checkAuthenticated, checkAdmin, (req, res) => {
@@ -141,6 +168,8 @@ app.get('/cart', checkAuthenticated, (req, res) => {
     const cart = req.session.cart || [];
     res.render('cart', { cart });
 });
+
+const CATEGORIES = ['Bakery','Beverages','Dairy','Snacks','Fruits & Vegetables'];
 
 // Cart routes
 app.post('/cart/add/:id', checkAuthenticated, (req, res) => CartItemController.add(req, res));
