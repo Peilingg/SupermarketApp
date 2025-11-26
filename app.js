@@ -117,6 +117,14 @@ app.post('/cart/add', checkAuthenticated, (req, res) => {
   CartItemController.add(req, res);
 });
 
+// Alias for older form action: /add-to-cart/:productId -> existing CartItemController.add
+app.post('/add-to-cart/:productId', checkAuthenticated, (req, res, next) => {
+  // normalize param name controller expects (CartItemController.add reads req.params.id or req.body.productId)
+  req.params.id = req.params.productId;
+  req.body.productId = req.params.productId;
+  return CartItemController.add(req, res, next);
+});
+
 // ------------------ Favourites routes (MVC) ------------------
 // List current user's favourites
 app.get('/favourites', checkAuthenticated, FavouriteController.listByUser);

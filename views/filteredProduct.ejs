@@ -105,9 +105,9 @@
                 </select>
               </div>
 
-              <form action="/add-to-cart/<%= products[i].productId %>" method="POST" class="text-center mt-2">
-                  <input type="hidden" name="quantity" id="quantity-<%= products[i].productId %>" value="1">
-                  <button type="submit" class="btn btn-primary">Add to Cart</button>
+              <form action="/cart/add/<%= products[i].productId %>" method="POST" class="text-center mt-2">
+                <input type="hidden" name="quantity" id="quantity-<%= products[i].productId %>" value="1">
+                <button type="submit" class="btn btn-primary">Add to Cart</button>
               </form>
             </div>
           </div>
