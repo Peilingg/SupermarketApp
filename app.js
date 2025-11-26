@@ -5,8 +5,8 @@ const multer = require('multer');
 const ProductController = require('./controllers/ProductController');
 const UserController = require('./controllers/UserController');
 const CartItemController = require('./controllers/CartItemController');
-const { checkAuthenticated, checkAdmin, validateRegistration } = require('./middleware');
 const FavouriteController = require('./controllers/FavouriteController');
+const { checkAuthenticated, checkAdmin, validateRegistration } = require('./middleware');
 
 const app = express();
 
@@ -65,19 +65,56 @@ app.get('/inventory', checkAuthenticated, checkAdmin, (req, res) => {
 // Shopping (all authenticated users) - list products via controller, render shopping.ejs
 app.get('/shopping', checkAuthenticated, ProductController.listForShopping);
 
-// Redirects for category filtering
-app.get('/filteredProduct', (req, res) => {
-  const category = req.query.category || '';
-  res.redirect('/shopping' + (category ? ('?category=' + encodeURIComponent(category)) : ''));
-});
-app.post('/filteredProduct', (req, res) => {
-  const category = req.body.category || '';
-  res.redirect('/shopping' + (category ? ('?category=' + encodeURIComponent(category)) : ''));
+// ------------------ Cart routes (DB-backed, MVC) ------------------
+// Use CartItemController methods (function-based model/controller)
+
+// Show current user's cart (list all cart items)
+app.get('/cart', checkAuthenticated, (req, res) => {
+  // controller expects req and res and will render EJS view
+  CartItemController.listAll(req, res);
 });
 
-// Single product view
-app.get('/product/:id', checkAuthenticated, (req, res) => {
-    ProductController.getById(req, res);
+// Update quantity for a cart item (expects body { quantity } or param)
+// supports both POST /cart/update/:cart_itemsId and POST /cart/update
+app.post('/cart/update/:cart_itemsId', checkAuthenticated, (req, res) => {
+  // controller expects req.params.id or req.body.cart_itemsId
+  req.params.id = req.params.cart_itemsId;
+  CartItemController.update(req, res);
+});
+app.post('/cart/update', checkAuthenticated, (req, res) => {
+  CartItemController.update(req, res);
+});
+
+// Remove a single cart item by cart_itemsId
+app.post('/cart/remove/:cart_itemsId', checkAuthenticated, (req, res) => {
+  // controller expects req.params.id or req.body.cart_itemsId
+  req.params.id = req.params.cart_itemsId;
+  CartItemController.remove(req, res);
+});
+app.post('/cart/remove', checkAuthenticated, (req, res) => {
+  CartItemController.remove(req, res);
+});
+
+// Clear all items for current user (DB)
+app.post('/cart/clear', checkAuthenticated, (req, res) => {
+  // controller method name is `clear`
+  CartItemController.clear(req, res);
+});
+
+// Get cart totals (AJAX or render partial) -> use subtotal endpoint
+app.get('/cart/totals', checkAuthenticated, (req, res) => {
+  CartItemController.subtotal(req, res);
+});
+
+// Add routes to support adding to cart (forms and AJAX)
+app.post('/cart/add/:productId', checkAuthenticated, (req, res) => {
+  // controller checks req.params.id or req.body.productId
+  req.params.id = req.params.productId;
+  req.body.productId = req.params.productId;
+  CartItemController.add(req, res);
+});
+app.post('/cart/add', checkAuthenticated, (req, res) => {
+  CartItemController.add(req, res);
 });
 
 // ------------------ Favourites routes (MVC) ------------------
@@ -139,47 +176,16 @@ app.get('/deleteProduct/:id', checkAuthenticated, checkAdmin, (req, res) => {
     ProductController.delete(req, res);
 });
 
-// Cart routes (adds to session cart). Use Product model via controller helper to fetch product data (controller returns/render).
-// We'll call a lightweight controller helper that returns a product via callback style
-app.post('/add-to-cart/:id', checkAuthenticated, (req, res) => {
-    ProductController.fetchForCart(req, res, function(err, product) {
-        if (err) { console.error(err); return res.status(500).send('Error adding to cart'); }
-        const productId = product.productId;
-        const qty = parseInt(req.body.quantity) || 1;
-        if (!req.session.cart) req.session.cart = [];
-
-        const existing = req.session.cart.find(i => i.productId === productId);
-        if (existing) existing.quantity += qty;
-        else {
-            req.session.cart.push({
-                productId: product.productId,
-                productName: product.productName,
-                price: product.price,
-                category: product.category,
-                quantity: qty,
-                image: product.image
-            });
-        }
-        res.redirect('/cart');
-    });
-});
-
-app.get('/cart', checkAuthenticated, (req, res) => {
-    const cart = req.session.cart || [];
-    res.render('cart', { cart });
-});
-
 const CATEGORIES = ['Bakery','Beverages','Dairy','Snacks','Fruits & Vegetables'];
 
-// Cart routes
-app.post('/cart/add/:id', checkAuthenticated, (req, res) => CartItemController.add(req, res));
-app.get('/cart', checkAuthenticated, (req, res) => CartItemController.listAll(req, res));
-app.post('/cart/update/:id', checkAuthenticated, (req, res) => CartItemController.update(req, res));
-app.post('/cart/remove/:id', checkAuthenticated, (req, res) => CartItemController.remove(req, res));
-app.post('/cart/clear', checkAuthenticated, (req, res) => CartItemController.clear(req, res));
-app.post('/cart/checkout', checkAuthenticated, (req, res) => {
-  // keep simple: render/handle checkout; for now redirect to /cart or implement checkout
-  return res.redirect('/cart');
+// Redirects for category filtering
+app.get('/filteredProduct', (req, res) => {
+  const category = req.query.category || '';
+  res.redirect('/shopping' + (category ? ('?category=' + encodeURIComponent(category)) : ''));
+});
+app.post('/filteredProduct', (req, res) => {
+  const category = req.body.category || '';
+  res.redirect('/shopping' + (category ? ('?category=' + encodeURIComponent(category)) : ''));
 });
 
 // User routes --------------------------------------------------------------
@@ -250,10 +256,9 @@ app.get('/users/:id/delete', checkAuthenticated, checkAdmin, (req, res) => {
     UserController.delete(req, res);
 });
 
-// Delete user (admin)
-app.get('/users/:id/delete', checkAuthenticated, checkAdmin, (req, res) => {
-    UserController.delete(req, res);
-});
+// ---------- (optional) session-cart endpoints kept if you need them ----------
+// If you still want a simple session-based cart (not DB-backed), add distinct routes
+// to avoid conflicting with the DB-backed /cart endpoints above.
 
 // Start the server
 const PORT = process.env.PORT || 3000;
