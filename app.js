@@ -268,6 +268,40 @@ app.get('/users/:id/delete', checkAuthenticated, checkAdmin, (req, res) => {
 // If you still want a simple session-based cart (not DB-backed), add distinct routes
 // to avoid conflicting with the DB-backed /cart endpoints above.
 
+// Handle checkout form POST from the cart page (avoid "Cannot POST /cart/checkout")
+app.post('/cart/checkout', checkAuthenticated, (req, res) => {
+  // simple flow: redirect to the checkout/invoice summary page (GET /checkout)
+  return res.redirect('/checkout');
+});
+
+// Show checkout/invoice summary
+app.get('/checkout', checkAuthenticated, (req, res) => {
+  const CartItem = require('./models/CartItem');
+  const sessionUser = req.session && req.session.user;
+  if (!sessionUser || !sessionUser.userId) return res.redirect('/login');
+
+  CartItem.listAll(sessionUser.userId, (err, items) => {
+    if (err) return res.status(500).send('Server error');
+
+    const mapped = (items || []).map(it => {
+      const price = Number(it.price || it.unitPrice || 0);
+      const qty = Number(it.quantity || it.qty || 0);
+      return Object.assign({}, it, { price, quantity: qty, lineTotal: +(price * qty) });
+    });
+
+    const subtotal = mapped.reduce((s, i) => s + (i.lineTotal || 0), 0);
+    const tax = +((subtotal * 0.07)).toFixed(2);             // adjust tax rule if needed
+    const shipping = +(subtotal > 50 ? 0 : 5).toFixed(2);     // adjust shipping rule if needed
+    const total = +(subtotal + tax + shipping).toFixed(2);
+
+    res.render('invoice', {
+      user: req.session.user,
+      items: mapped,
+      subtotal, tax, shipping, total
+    });
+  });
+});
+
 // Start the server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
