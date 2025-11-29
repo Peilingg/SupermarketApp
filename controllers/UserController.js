@@ -105,7 +105,8 @@ const UserController = {
             password: req.body.password,
             address: req.body.address || null,
             contact: req.body.contact || null,
-            role: req.body.role || 'user'
+            //role: req.body.role || 'user'
+            role: 'user' // force role to 'user' on registration
         };
 
         User.add(user, function(err, result) {

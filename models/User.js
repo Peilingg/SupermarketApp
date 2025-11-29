@@ -22,7 +22,7 @@ const User = {
     // add a new user
     add: function(user, callback) {
         const sql = 'INSERT INTO users (username, email, password, address, contact, role) VALUES (?, ?, SHA1(?), ?, ?, ?)';
-        const params = [ user.username, user.email, user.password, user.address || null, user.contact || null, user.role || 'user' ];
+        const params = [ user.username, user.email, user.password, user.address || null, user.contact || null, user.role];
         db.query(sql, params, function(err, result) { return callback(err, result); });
     },
 
