@@ -6,6 +6,8 @@ const ProductController = require('./controllers/ProductController');
 const UserController = require('./controllers/UserController');
 const CartItemController = require('./controllers/CartItemController');
 const FavouriteController = require('./controllers/FavouriteController');
+const PurchaseController = require('./controllers/PurchaseController');
+const Purchase = require('./models/Purchase');
 const { checkAuthenticated, checkAdmin, validateRegistration } = require('./middleware');
 
 const app = express();
@@ -242,6 +244,20 @@ app.post('/profile/edit', checkAuthenticated, (req, res) => {
 app.get('/users', checkAuthenticated, checkAdmin, (req, res) => {
     UserController.listAll(req, res);
 });
+// Alias for manage users page
+app.get('/manageusers', checkAuthenticated, checkAdmin, (req, res) => {
+    UserController.listAll(req, res);
+});
+
+// Purchase history (current user)
+app.get('/purchases', checkAuthenticated, (req, res) => {
+    PurchaseController.listByUser(req, res);
+});
+
+// Manage all orders (admin)
+app.get('/manageorders', checkAuthenticated, checkAdmin, (req, res) => {
+    PurchaseController.listAll(req, res);
+});
 
 // Get user by id (admin)
 app.get('/users/:id', checkAuthenticated, checkAdmin, (req, res) => {
@@ -277,8 +293,12 @@ app.post('/cart/checkout', checkAuthenticated, (req, res) => {
 // Show checkout/invoice summary
 app.get('/checkout', checkAuthenticated, (req, res) => {
   const CartItem = require('./models/CartItem');
+  const Product = require('./models/Product');
   const sessionUser = req.session && req.session.user;
   if (!sessionUser || !sessionUser.userId) return res.redirect('/login');
+
+  const paymentMethods = ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'PayNow'];
+  const paymentMethod = req.query.paymentMethod || paymentMethods[0];
 
   CartItem.listAll(sessionUser.userId, (err, items) => {
     if (err) return res.status(500).send('Server error');
@@ -294,10 +314,68 @@ app.get('/checkout', checkAuthenticated, (req, res) => {
     const shipping = +(subtotal > 50 ? 0 : 5).toFixed(2);     // adjust shipping rule if needed
     const total = +(subtotal + tax + shipping).toFixed(2);
 
-    res.render('invoice', {
+    res.render('confirmationPurchase', {
       user: req.session.user,
       items: mapped,
-      subtotal, tax, shipping, total
+      subtotal, tax, shipping, total,
+      invoice: false,
+      paymentMethod,
+      paymentDetails: null,
+      paymentMethods,
+      orderId: null
+    });
+  });
+});
+
+// Confirm + "pay" (simple invoice stub)
+app.post('/checkout/confirm', checkAuthenticated, (req, res) => {
+  const CartItem = require('./models/CartItem');
+  const Product = require('./models/Product');
+  const sessionUser = req.session && req.session.user;
+  if (!sessionUser || !sessionUser.userId) return res.redirect('/login');
+
+  const paymentMethods = ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'PayNow'];
+  const paymentMethod = req.body.paymentMethod || paymentMethods[0];
+  const paymentDetails = (method => {
+    if (method === 'Contactless payment (Apple Pay)') return 'Pay with your linked Apple Pay device.';
+    if (method === 'PayNow') return 'PayNow UEN: 20241234A (Reference: your email)';
+    return 'Visa / Mastercard / AMEX supported.';
+  })(paymentMethod);
+  const orderId = req.body.orderId || `INV-${Date.now()}`;
+
+  CartItem.listAll(sessionUser.userId, (err, items) => {
+    if (err) return res.status(500).send('Server error');
+    const mapped = (items || []).map(it => {
+      const price = Number(it.price || it.unitPrice || 0);
+      const qty = Number(it.quantity || it.qty || 0);
+      return Object.assign({}, it, { price, quantity: qty, lineTotal: +(price * qty) });
+    });
+
+    const subtotal = mapped.reduce((s, i) => s + (i.lineTotal || 0), 0);
+    const tax = +((subtotal * 0.07)).toFixed(2);
+    const shipping = +(subtotal > 50 ? 0 : 5).toFixed(2);
+    const total = +(subtotal + tax + shipping).toFixed(2);
+
+    // Record purchase then clear cart and render invoice
+    Purchase.record(sessionUser.userId, { subtotal, tax, shipping, total, paymentMethod, paymentDetails }, mapped, (saveErr, purchaseId) => {
+      if (saveErr) console.error('Checkout confirm -> save purchase failed', saveErr);
+      const finalOrderId = purchaseId || orderId;
+
+      CartItem.clear(sessionUser.userId, (clearErr) => {
+        if (clearErr) console.error('Checkout confirm -> clear cart failed', clearErr);
+
+        res.render('invoice', {
+          user: req.session.user,
+          items: mapped,
+          subtotal, tax, shipping, total,
+          invoice: true,
+          paymentMethod,
+          paymentDetails,
+          paymentMethods,
+          orderId: finalOrderId,
+          generatedAt: new Date()
+        });
+      });
     });
   });
 });

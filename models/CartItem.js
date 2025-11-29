@@ -1,6 +1,15 @@
 const db = require('../db');
 
 const CartItem = {
+  // fetch a single cart item (includes productId, quantity)
+  getById: function(cartItemsId, callback) {
+    const sql = 'SELECT cart_itemsId, productId, userId, quantity FROM cart_items WHERE cart_itemsId = ? LIMIT 1';
+    db.query(sql, [cartItemsId], (err, results) => {
+      if (err) return callback(err);
+      return callback(null, (results && results[0]) ? results[0] : null);
+    });
+  },
+
   // list all cart items for a user (includes product details)
   listAll: function(userId, callback) {
     const sql = `
@@ -12,7 +21,8 @@ const CartItem = {
         ci.created_at,
         p.productName,
         p.price,
-        p.image
+        p.image,
+        p.quantity AS availableQuantity
       FROM cart_items ci
       LEFT JOIN products p ON ci.productId = p.productId
       WHERE ci.userId = ?

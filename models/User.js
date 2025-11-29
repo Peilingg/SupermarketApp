@@ -3,38 +3,44 @@ const db = require('../db');
 const User = {
     // get all users (omit passwords in list)
     getAll: function(callback) {
-        const sql = 'SELECT userId, username, email, address, contact, role FROM users';
+        const sql = 'SELECT userId, username, email, address, contact, role, status FROM users';
         db.query(sql, function(err, results) { return callback(err, results); });
     },
 
     // get a user by id (omit password)
     getById: function(id, callback) {
-        const sql = 'SELECT userId, username, email, address, contact, role FROM users WHERE userId = ?';
+        const sql = 'SELECT userId, username, email, address, contact, role, status FROM users WHERE userId = ?';
         db.query(sql, [id], function(err, results) { if (err) return callback(err); return callback(null, results[0] || null); });
+    },
+
+    // get a user by email (used to enforce unique emails on registration)
+    getByEmail: function(email, callback) {
+        const sql = 'SELECT userId, username, email, address, contact, role, status FROM users WHERE email = ?';
+        db.query(sql, [email], function(err, results) { if (err) return callback(err); return callback(null, results[0] || null); });
     },
 
     // authenticate user (email + plain password) -> returns full user row if ok (includes role & id)
     authenticate: function(email, password, callback) {
-        const sql = 'SELECT userId, username, email, address, contact, role FROM users WHERE email = ? AND password = SHA1(?)';
+        const sql = 'SELECT userId, username, email, address, contact, role, status FROM users WHERE email = ? AND password = SHA1(?)';
         db.query(sql, [email, password], function(err, results) { if (err) return callback(err); return callback(null, results[0] || null); });
     },
 
     // add a new user
     add: function(user, callback) {
-        const sql = 'INSERT INTO users (username, email, password, address, contact, role) VALUES (?, ?, SHA1(?), ?, ?, ?)';
-        const params = [ user.username, user.email, user.password, user.address || null, user.contact || null, user.role];
+        const sql = 'INSERT INTO users (username, email, password, address, contact, role, status) VALUES (?, ?, SHA1(?), ?, ?, ?, ?)';
+        const params = [ user.username, user.email, user.password, user.address || null, user.contact || null, user.role, user.status || 'active'];
         db.query(sql, params, function(err, result) { return callback(err, result); });
     },
 
     // update an existing user by id
     update: function(id, user, callback) {
         const sql = user.password
-            ? 'UPDATE users SET username = ?, email = ?, password = SHA1(?), address = ?, contact = ?, role = ? WHERE userId = ?'
-            : 'UPDATE users SET username = ?, email = ?, address = ?, contact = ?, role = ? WHERE userId = ?';
+            ? 'UPDATE users SET username = ?, email = ?, password = SHA1(?), address = ?, contact = ?, role = ?, status = ? WHERE userId = ?'
+            : 'UPDATE users SET username = ?, email = ?, address = ?, contact = ?, role = ?, status = ? WHERE userId = ?';
 
         const params = user.password
-            ? [user.username, user.email, user.password, user.address || null, user.contact || null, user.role || 'user', id]
-            : [user.username, user.email, user.address || null, user.contact || null, user.role || 'user', id];
+            ? [user.username, user.email, user.password, user.address || null, user.contact || null, user.role || 'user', user.status || 'active', id]
+            : [user.username, user.email, user.address || null, user.contact || null, user.role || 'user', user.status || 'active', id];
 
         db.query(sql, params, function(err, result) { return callback(err, result); });
     },

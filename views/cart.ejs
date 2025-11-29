@@ -56,6 +56,8 @@
                const id = it.cart_itemsId || it.ProductId || it.productId;
                const qty = Number(it.quantity) || 0;
                const price = Number(it.price) || 0;
+               const available = (typeof it.availableQuantity !== 'undefined') ? Number(it.availableQuantity) : 0;
+               const maxSelectable = Math.max(qty, qty + available); // allow keeping current qty + any remaining stock
           %>
             <tr id="row-<%= id %>">
               <td><%= idx + 1 %></td>
@@ -66,7 +68,7 @@
               <td class="text-center">
                 <form action="/cart/update/<%= id %>" method="POST" class="d-flex align-items-center justify-content-center gap-2 update-form" data-id="<%= id %>" data-price="<%= price %>">
                   <select name="quantity" class="form-select quantity-select">
-                    <% const maxQ = Math.max(20, qty + 10);
+                    <% const maxQ = Math.max(1, maxSelectable);
                        for (let q = 1; q <= maxQ; q++) { %>
                       <option value="<%= q %>" <%= q === qty ? 'selected' : '' %>><%= q %></option>
                     <% } %>

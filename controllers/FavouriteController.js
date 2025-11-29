@@ -65,9 +65,10 @@ const FavouriteController = {
       return res.redirect('/favourites');
     }
 
-    Favourite.add({ productId, userId }, function(err, result) {
-      if (err) {
-        console.error('FavouriteController.add error:', err);
+    // prevent duplicate favourites for the same user/product
+    Favourite.findByUserAndProduct(userId, productId, function(findErr, existing) {
+      if (findErr) {
+        console.error('FavouriteController.add find error:', findErr);
         if (req.xhr || (req.headers.accept && req.headers.accept.indexOf('application/json') !== -1)) {
           return res.status(500).json({ success: false, message: 'Unable to add favourite.' });
         }
@@ -75,11 +76,31 @@ const FavouriteController = {
         return res.redirect('/favourites');
       }
 
-      if (req.xhr || (req.headers.accept && req.headers.accept.indexOf('application/json') !== -1)) {
-        return res.json({ success: true, message: 'Item added to favourites' });
+      if (existing) {
+        const msg = 'Item already added into favourites';
+        if (req.xhr || (req.headers.accept && req.headers.accept.indexOf('application/json') !== -1)) {
+          return res.status(409).json({ success: false, message: msg });
+        }
+        req.flash && req.flash('error', msg);
+        return res.redirect('/favourites');
       }
-      req.flash && req.flash('success', 'Added to favourites.');
-      return res.redirect('/favourites');
+
+      Favourite.add({ productId, userId }, function(err, result) {
+        if (err) {
+          console.error('FavouriteController.add error:', err);
+          if (req.xhr || (req.headers.accept && req.headers.accept.indexOf('application/json') !== -1)) {
+            return res.status(500).json({ success: false, message: 'Unable to add favourite.' });
+          }
+          req.flash && req.flash('error', 'Unable to add favourite.');
+          return res.redirect('/favourites');
+        }
+
+        if (req.xhr || (req.headers.accept && req.headers.accept.indexOf('application/json') !== -1)) {
+          return res.json({ success: true, message: 'Item added to favourites' });
+        }
+        req.flash && req.flash('success', 'Added to favourites.');
+        return res.redirect('/favourites');
+      });
     });
   },
 

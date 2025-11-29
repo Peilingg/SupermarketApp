@@ -6,19 +6,28 @@
         </button>
         <div class="collapse navbar-collapse" id="collapsibleNavbar">
         <ul class="navbar-nav ms-auto">
-            <% if (user.role === "admin") { %>
+            <% if (user && user.role === "admin") { %>
             <li class="nav-item">
                 <a class="nav-link" href="/inventory">Inventory</a>
             </li> 
             <li class="nav-item">
                 <a class="nav-link" href="/addProduct">Add new product</a>
             </li> 
+            <li class="nav-item">
+                <a class="nav-link" href="/manageusers">Manage Users</a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link" href="/manageorders">Manage Orders</a>
+            </li>
             <% } %>
 
-            <% if (user.role === "user") { %>
+            <% if (user && user.role === "user") { %>
                 <li class="nav-item">
                     <a class="nav-link" href="/shopping">Shopping</a>
                 </li> 
+                 <li class="nav-item">
+                    <a class="nav-link" href="/purchases">Purchase History</a>
+                </li>
             <% } %>
             <li class="nav-item">
                 <a class="nav-link" href="/profile">

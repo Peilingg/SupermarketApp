@@ -1,31 +1,69 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-  <title>Invoice</title>
+  <title>Invoice <%= orderId ? ('#' + orderId) : '' %></title>
+  <style>
+    body { background: #f7f8fa; }
+    .card-border { border-radius: 10px; }
+    .label { color: #6c757d; font-size: 0.9rem; }
+    .table thead th { background-color: #f8f9fa; }
+  </style>
 </head>
 <body>
   <div class="container my-4">
-    <div class="d-flex justify-content-between align-items-center mb-4">
-      <h2>Invoice</h2>
+    <div class="alert alert-success">
+      Payment received. This invoice serves as your receipt.
+    </div>
+
+    <div class="d-flex justify-content-between align-items-center mb-3">
       <div>
-        <button class="btn btn-outline-secondary" onclick="window.print()">Print</button>
+        <h2 class="mb-0">Invoice</h2>
+        <div class="text-muted">Thank you for your purchase.</div>
+      </div>
+      <div class="text-end">
+        <div class="fw-semibold"><%= orderId || 'Order' %></div>
+        <div class="text-muted"><%= generatedAt ? new Date(generatedAt).toLocaleString() : new Date().toLocaleString() %></div>
+        <div><span class="badge bg-success">Paid</span></div>
       </div>
     </div>
 
     <div class="row mb-3">
       <div class="col-md-6">
-        <h6>Bill to</h6>
-        <p>
-          <strong><%= user ? user.username : 'Guest' %></strong><br>
-          <%= user && user.address ? user.address.replace(/\n/g,'<br>') : 'No address provided' %>
-        </p>
+        <h6 class="mb-2">Bill to</h6>
+        <div class="card p-3 card-border shadow-sm">
+          <div><strong><%= user ? user.username : 'Guest' %></strong></div>
+          <div class="text-muted"><%= user && user.email ? user.email : '' %></div>
+          <div class="mt-2">
+            <div class="label">Address</div>
+            <div><%= user && user.address ? user.address.replace(/\n/g,'<br>') : 'No address provided' %></div>
+          </div>
+          <div class="mt-2">
+            <div class="label">Contact</div>
+            <div><%= user && user.contact ? user.contact : 'Not provided' %></div>
+          </div>
+        </div>
       </div>
       <div class="col-md-6 text-md-end">
-        <h6>Invoice summary</h6>
-        <p>Invoice date: <%= new Date().toLocaleDateString() %></p>
+        <h6 class="mb-2">Order summary</h6>
+        <div class="card p-3 card-border shadow-sm">
+          <div class="d-flex justify-content-between">
+            <span class="label">Order date</span>
+            <span><%= generatedAt ? new Date(generatedAt).toLocaleDateString() : new Date().toLocaleDateString() %></span>
+          </div>
+          <div class="d-flex justify-content-between">
+            <span class="label">Payment method</span>
+            <span><%= paymentMethod || 'Not specified' %></span>
+          </div>
+          <% if (paymentDetails) { %>
+            <div class="d-flex justify-content-between">
+              <span class="label">Payment details</span>
+              <span class="text-muted"><%= paymentDetails %></span>
+            </div>
+          <% } %>
+        </div>
       </div>
     </div>
 
@@ -35,14 +73,14 @@
           <tr>
             <th style="width:48px">#</th>
             <th>Product</th>
-            <th style="width:100px">Unit</th>
-            <th style="width:100px">Quantity</th>
-            <th style="width:120px">Line total</th>
+            <th style="width:120px">Unit</th>
+            <th style="width:120px">Quantity</th>
+            <th style="width:140px">Line total</th>
           </tr>
         </thead>
         <tbody>
         <% if (!items || items.length === 0) { %>
-          <tr><td colspan="5" class="text-center">Your cart is empty.</td></tr>
+          <tr><td colspan="5" class="text-center">No items.</td></tr>
         <% } else { %>
           <% items.forEach(function(item, idx) { %>
             <tr>
@@ -68,12 +106,11 @@
       </table>
     </div>
 
-    <div class="row">
+    <div class="row align-items-start">
       <div class="col-md-6">
-        <p class="text-muted small">Thank you for shopping with us.</p>
       </div>
       <div class="col-md-6">
-        <table class="table table-borderless">
+        <table class="table table-borderless mb-0">
           <tbody>
             <tr>
               <th class="text-end">Subtotal</th>
@@ -93,12 +130,12 @@
             </tr>
           </tbody>
         </table>
-
-        <form action="/checkout/confirm" method="POST">
-          <% /* include a simple CSRF/token field here if you use one */ %>
-          <button type="submit" class="btn btn-success w-100">Confirm and Pay</button>
-        </form>
       </div>
+    </div>
+
+    <div class="d-flex justify-content-between mt-3">
+      <a href="/shopping" class="btn btn-outline-secondary">Continue Shopping</a>
+      <button class="btn btn-primary" onclick="window.print()">Print / Save PDF</button>
     </div>
   </div>
 </body>

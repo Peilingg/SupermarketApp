@@ -50,32 +50,7 @@
   </style>
 </head>
 <body>
-    <nav class="navbar navbar-expand-sm bg-dark navbar-dark">
-      <div class="container-fluid">
-        <a class="navbar-brand" href="/">Supermarket App</a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#collapsibleNavbar">
-          <span class="navbar-toggler-icon"></span>
-        </button>
-        <div class="collapse navbar-collapse" id="collapsibleNavbar">
-          <ul class="navbar-nav ms-auto">
-            <li class="nav-item">
-              <a class="nav-link" href="/favourite">View Favourites</a>
-            </li> 
-            <li class="nav-item">
-              <a class="nav-link" href="/cart">View Cart</a>
-            </li> 
-            <li class="nav-item">
-              <a class="nav-link" href="/profile">
-                <img src="/images/profile.png" alt="Profile" width="24" class="rounded-circle"> Profile
-              </a>
-            </li>
-            <li class="nav-item">
-              <a class="nav-link" href="/logout">Logout</a>
-            </li>
-          </ul>
-        </div>
-      </div>
-    </nav>
+  <%- include('partials/navbar2') %>
 
   <div class="container mt-4">
     <p>Welcome, <%= user ? user.username : 'Guest' %> <%= user ? '(' + user.role + ')' : '' %></p>
@@ -114,22 +89,37 @@
               </form>
                <h5 class="card-title">
                  <a href="/product/<%= products[i].productId %>"><%= products[i].productName %></a>
-               </h5>
-              <p class="card-text"><strong>Quantity:</strong> <%= products[i].quantity %></p>
+              </h5>
+              <p class="card-text">
+                <strong>Status:</strong>
+                <% if (products[i].quantity > 0) { %>
+                  In stock (<%= products[i].quantity %> available)
+                <% } else { %>
+                  <span class="text-danger">Out of stock</span>
+                <% } %>
+              </p>
               <p class="card-text"><strong>Price:</strong> $<%= products[i].price.toFixed(2) %></p>
               <p class="card-text"><strong>Category:</strong> <%= products[i].category %></p>
 
               <div class="quantity-wrap mt-2">
-                <select class="form-select quantity-select" onchange="document.getElementById('quantity-<%= products[i].productId %>').value = this.value">
-                  <% for (let q = 1; q <= products[i].quantity; q++) { %>
-                    <option value="<%= q %>"><%= q %></option>
-                  <% } %>
-                </select>
+                <% if (products[i].quantity > 0) { %>
+                  <select class="form-select quantity-select" onchange="document.getElementById('quantity-<%= products[i].productId %>').value = this.value">
+                    <% for (let q = 1; q <= products[i].quantity; q++) { %>
+                      <option value="<%= q %>"><%= q %></option>
+                    <% } %>
+                  </select>
+                <% } else { %>
+                  <select class="form-select quantity-select" disabled>
+                    <option>0</option>
+                  </select>
+                <% } %>
               </div>
 
               <form action="/add-to-cart/<%= products[i].productId %>" method="POST" class="text-center mt-2">
                   <input type="hidden" name="quantity" id="quantity-<%= products[i].productId %>" value="1">
-                  <button type="submit" class="btn btn-primary">Add to Cart</button>
+                  <button type="submit" class="btn btn-primary" <%= products[i].quantity > 0 ? '' : 'disabled' %>>
+                    <%= products[i].quantity > 0 ? 'Add to Cart' : 'Out of Stock' %>
+                  </button>
               </form>
             </div>
           </div>
@@ -157,17 +147,44 @@ document.addEventListener('DOMContentLoaded', function(){
         body: params.toString(),
         credentials: 'same-origin'
       })
-      .then(response => {
-        if (!response.ok) return response.text().then(t => Promise.reject(t || 'Server error'));
+      .then(async response => {
+        const contentType = response.headers.get('content-type') || '';
+        const isJson = contentType.includes('application/json');
+        const payload = isJson
+          ? await response.json().catch(() => null)
+          : await response.text().catch(() => '');
+
+        if (!response.ok) {
+          const message = (payload && payload.message)
+            ? payload.message
+            : (typeof payload === 'string' && payload.length > 0)
+              ? payload
+              : 'Server error';
+          throw message;
+        }
+
+        // ok response
+        return payload || {};
+      })
+      .then(data => {
+        if (data && data.success === false) throw (data.message || 'Unable to add favourite');
         // on success, redirect to the favourites page
         window.location.href = '/favourites';
       })
       .catch(err => {
         console.error('Fav add error:', err);
+        const msg = (typeof err === 'string')
+          ? err
+          : (err && err.message) ? err.message : 'Network or server error';
         const alertEl = document.createElement('div');
-        alertEl.className = 'position-fixed top-0 end-0 m-3 alert alert-danger';
+        alertEl.className = 'position-fixed alert alert-danger text-center shadow';
         alertEl.style.zIndex = 1200;
-        alertEl.textContent = (typeof err === 'string' ? err : 'Network or server error');
+        alertEl.style.top = '80px';
+        alertEl.style.left = '50%';
+        alertEl.style.transform = 'translateX(-50%)';
+        alertEl.style.minWidth = '320px';
+        alertEl.style.maxWidth = '640px';
+        alertEl.textContent = msg;
         document.body.appendChild(alertEl);
         setTimeout(()=> alertEl.remove(), 3500);
       });

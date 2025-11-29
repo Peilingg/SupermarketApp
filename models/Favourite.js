@@ -30,6 +30,15 @@ const Favourite = {
     });
   },
 
+  // find a favourite by user + product (to prevent duplicates)
+  findByUserAndProduct: function(userId, productId, callback) {
+    const sql = 'SELECT * FROM favourites WHERE userId = ? AND productId = ? LIMIT 1';
+    db.query(sql, [userId, productId], function(err, results) {
+      if (err) return callback(err);
+      return callback(null, results && results[0] ? results[0] : null);
+    });
+  },
+
   // remove a favourite by favouriteId
   remove: function(favouriteId, callback) {
     const sql = 'DELETE FROM favourites WHERE favouriteId = ?';

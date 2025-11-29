@@ -4,8 +4,8 @@ const UserController = {
     // list all users -> render users.ejs
     listAll: function(req, res) {
         User.getAll(function(err, users) {
-            if (err) { console.error(err); return res.status(500).render('users', { users: [], error: 'Database error' }); }
-            return res.render('users', { users, error: null });
+            if (err) { console.error(err); return res.status(500).render('manageUsers', { users: [], error: 'Database error' }); }
+            return res.render('manageUsers', { users, error: null });
         });
     },
 
@@ -79,7 +79,8 @@ const UserController = {
             password: req.body.password || null,
             address: req.body.address || null,
             contact: req.body.contact || null,
-            role: (sessionUser.role === 'admin' && req.body.role) ? req.body.role : sessionUser.role // only admin can change role
+            role: (sessionUser.role === 'admin' && req.body.role) ? req.body.role : sessionUser.role, // only admin can change role
+            status: sessionUser.status || 'active'
         };
 
         User.update(id, newData, function(err, result) {
@@ -105,14 +106,34 @@ const UserController = {
             password: req.body.password,
             address: req.body.address || null,
             contact: req.body.contact || null,
-            //role: req.body.role || 'user'
-            role: 'user' // force role to 'user' on registration
+            role: 'user', // force role to 'user' on registration
+            status: 'active'
         };
 
-        User.add(user, function(err, result) {
-            if (err) { console.error(err); return res.status(500).render('register', { user, error: 'Failed to create user' }); }
-            req.flash('success', 'Registration successful! Please log in.');
-            return res.redirect('/login');
+        // Prevent duplicate email registrations
+        User.getByEmail(user.email, function(checkErr, existing) {
+            if (checkErr) {
+                console.error('UserController.add - email check error', checkErr);
+                req.flash('error', 'Failed to create user');
+                req.flash('formData', req.body);
+                return res.redirect('/register');
+            }
+            if (existing) {
+                req.flash('error', 'Account already exist');
+                req.flash('formData', req.body);
+                return res.redirect('/register');
+            }
+
+            User.add(user, function(err, result) {
+                if (err) {
+                    console.error(err);
+                    req.flash('error', 'Failed to create user');
+                    req.flash('formData', req.body);
+                    return res.redirect('/register');
+                }
+                req.flash('success', 'Registration successful! Please log in.');
+                return res.redirect('/login');
+            });
         });
     },
 
@@ -123,6 +144,10 @@ const UserController = {
         User.authenticate(email, password, function(err, user) {
             if (err) { console.error(err); req.flash('error', 'Database error'); return res.redirect('/login'); }
             if (!user) { req.flash('error', 'Invalid email or password.'); return res.redirect('/login'); }
+            if (user.status && user.status.toLowerCase() === 'disabled') {
+                req.flash('error', 'Your account is temporarily ban!');
+                return res.redirect('/login');
+            }
             // save user object with userId
             req.session.user = user; // user.userId present from model
             req.flash('success', 'Login successful!');
@@ -140,7 +165,8 @@ const UserController = {
             password: req.body.password || null,
             address: req.body.address || null,
             contact: req.body.contact || null,
-            role: req.body.role || 'user'
+            role: req.body.role || 'user',
+            status: req.body.status || 'active'
         };
 
         User.update(id, newData, function(err, result) {
