@@ -8,7 +8,8 @@ const CartItemController = require('./controllers/CartItemController');
 const FavouriteController = require('./controllers/FavouriteController');
 const PurchaseController = require('./controllers/PurchaseController');
 const PurchaseItemController = require('./controllers/PurchaseItemController');
-const Purchase = require('./models/Purchase');
+const UserVoucherController = require('./controllers/UserVoucherController');
+const VoucherController = require('./controllers/VoucherController');
 const { checkAuthenticated, checkAdmin, validateRegistration } = require('./middleware');
 
 const app = express();
@@ -152,6 +153,48 @@ app.get('/favourites/remove/:id', checkAuthenticated, FavouriteController.remove
 
 // Remove favourite by userId + productId (toggle) - accepts JSON/form body
 app.post('/favourites/removeByProduct', checkAuthenticated, FavouriteController.removeByUserProduct);
+
+// User vouchers (API-style)
+app.get('/uservouchers', checkAuthenticated, (req, res) => {
+    UserVoucherController.list(req, res);
+});
+app.post('/uservouchers/claim/:voucherId', checkAuthenticated, (req, res) => {
+    UserVoucherController.claim(req, res);
+});
+app.post('/uservouchers/apply', checkAuthenticated, (req, res) => {
+    UserVoucherController.apply(req, res);
+});
+app.post('/uservouchers/clear', checkAuthenticated, (req, res) => {
+    UserVoucherController.clear(req, res);
+});
+
+// Vouchers (user)
+app.get('/vouchers', checkAuthenticated, (req, res) => {
+    VoucherController.listForUser(req, res);
+});
+app.post('/vouchers/claim/:voucherId', checkAuthenticated, (req, res) => {
+    VoucherController.claim(req, res);
+});
+app.post('/vouchers/apply', checkAuthenticated, (req, res) => {
+    VoucherController.apply(req, res);
+});
+app.post('/vouchers/clear', checkAuthenticated, (req, res) => {
+    VoucherController.clearApplied(req, res);
+});
+
+// Vouchers (admin)
+app.get('/adminVouchers', checkAuthenticated, checkAdmin, (req, res) => {
+    VoucherController.adminList(req, res);
+});
+app.post('/adminVouchers', checkAuthenticated, checkAdmin, (req, res) => {
+    VoucherController.adminCreate(req, res);
+});
+app.post('/adminVouchers/:id', checkAuthenticated, checkAdmin, (req, res) => {
+    VoucherController.adminUpdate(req, res);
+});
+app.post('/adminVouchers/:id/delete', checkAuthenticated, checkAdmin, (req, res) => {
+    VoucherController.adminDelete(req, res);
+});
 
 
 // Add product form (admin) - render with categories
@@ -333,12 +376,18 @@ app.get('/checkout', checkAuthenticated, (req, res) => {
     const subtotal = mapped.reduce((s, i) => s + (i.lineTotal || 0), 0);
     const tax = +((subtotal * 0.07)).toFixed(2);             // adjust tax rule if needed
     const shipping = +(subtotal > 50 ? 0 : 5).toFixed(2);     // adjust shipping rule if needed
-    const total = +(subtotal + tax + shipping).toFixed(2);
+    const appliedVoucher = req.session.appliedVoucher || null;
+    const voucherCalc = VoucherController.computeDiscount(appliedVoucher, subtotal);
+    const voucherDiscount = +(voucherCalc.discount || 0).toFixed(2);
+    const total = +(subtotal + tax + shipping - voucherDiscount).toFixed(2);
 
     res.render('confirmationPurchase', {
       user: req.session.user,
       items: mapped,
       subtotal, tax, shipping, total,
+      voucher: appliedVoucher,
+      voucherDiscount,
+      voucherReason: voucherCalc.reason || null,
       invoice: false,
       paymentMethod,
       paymentDetails: null,
@@ -375,12 +424,32 @@ app.post('/checkout/confirm', checkAuthenticated, (req, res) => {
     const subtotal = mapped.reduce((s, i) => s + (i.lineTotal || 0), 0);
     const tax = +((subtotal * 0.07)).toFixed(2);
     const shipping = +(subtotal > 50 ? 0 : 5).toFixed(2);
-    const total = +(subtotal + tax + shipping).toFixed(2);
+    const appliedVoucher = req.session.appliedVoucher || null;
+    const voucherCalc = VoucherController.computeDiscount(appliedVoucher, subtotal);
+    const voucherDiscount = +(voucherCalc.discount || 0).toFixed(2);
+    const total = +(subtotal + tax + shipping - voucherDiscount).toFixed(2);
 
     // Record purchase then clear cart and render invoice
-    Purchase.record(sessionUser.userId, { subtotal, tax, shipping, total, paymentMethod, paymentDetails }, mapped, (saveErr, purchaseId) => {
+    const summary = {
+      subtotal,
+      tax,
+      shipping,
+      total,
+      paymentMethod,
+      paymentDetails: paymentDetails + (appliedVoucher && voucherDiscount > 0 ? ` | Voucher ${appliedVoucher.code} (-$${voucherDiscount.toFixed(2)})` : '')
+    };
+
+    Purchase.record(sessionUser.userId, summary, mapped, (saveErr, purchaseId) => {
       if (saveErr) console.error('Checkout confirm -> save purchase failed', saveErr);
       const finalOrderId = purchaseId || orderId;
+
+       // mark voucher used if applied successfully
+      if (!saveErr && appliedVoucher && voucherDiscount > 0 && appliedVoucher.userVoucherId) {
+        Voucher.markUsed(appliedVoucher.userVoucherId, (vErr) => {
+          if (vErr) console.error('Failed to mark voucher used', vErr);
+        });
+      }
+      delete req.session.appliedVoucher;
 
       CartItem.clear(sessionUser.userId, (clearErr) => {
         if (clearErr) console.error('Checkout confirm -> clear cart failed', clearErr);
@@ -389,6 +458,8 @@ app.post('/checkout/confirm', checkAuthenticated, (req, res) => {
           user: req.session.user,
           items: mapped,
           subtotal, tax, shipping, total,
+          voucher: appliedVoucher,
+          voucherDiscount,
           invoice: true,
           paymentMethod,
           paymentDetails,

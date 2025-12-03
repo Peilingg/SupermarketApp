@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <title>Vouchers</title>
+  <style>
+    body { background: #f7f8fa; }
+    .card-border { border-radius: 10px; }
+    .label { color: #6c757d; font-size: 0.9rem; }
+  </style>
+</head>
+<body>
+  <%- include('partials/navbar') %>
+
+  <div class="container my-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h2 class="mb-0">Vouchers</h2>
+      <div class="text-muted small">Claim, apply and track your vouchers.</div>
+    </div>
+
+    <% if (errors && errors.length) { %>
+      <div class="alert alert-danger">
+        <% errors.forEach(function(msg){ %><div><%= msg %></div><% }); %>
+      </div>
+    <% } %>
+    <% if (success && success.length) { %>
+      <div class="alert alert-success">
+        <% success.forEach(function(msg){ %><div><%= msg %></div><% }); %>
+      </div>
+    <% } %>
+
+    <% if (applied) { %>
+      <div class="alert alert-info d-flex justify-content-between align-items-center">
+        <div>
+          <strong>Applied:</strong> <%= applied.code %> - <%= applied.description || '' %>
+        </div>
+        <form method="POST" action="/vouchers/clear" class="mb-0">
+          <button class="btn btn-sm btn-outline-danger">Remove</button>
+        </form>
+      </div>
+    <% } %>
+
+    <div class="card mb-4 shadow-sm card-border">
+      <div class="card-header"><strong>Available to claim</strong></div>
+      <div class="card-body">
+        <% if (available && available.length) { %>
+          <div class="row g-3">
+            <% available.forEach(function(v) { %>
+              <div class="col-md-6 col-lg-4">
+                <div class="border p-3 h-100 rounded">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <strong><%= v.code %></strong>
+                    <% if (v.status) { %><span class="badge bg-secondary">Claimed</span><% } %>
+                  </div>
+                  <div class="text-muted small mt-1"><%= v.description || '' %></div>
+                  <div class="mt-2">
+                    <div class="label">Value</div>
+                    <div><%= (v.discountType === 'percent') ? (v.discountValue + '% off') : ('$' + Number(v.discountValue || 0).toFixed(2) + ' off') %></div>
+                  </div>
+                  <div class="mt-2">
+                    <div class="label">Min spend</div>
+                    <div>$<%= Number(v.minSpend || 0).toFixed(2) %></div>
+                  </div>
+                  <div class="mt-2">
+                    <div class="label">Valid</div>
+                    <div>
+                      <%= v.startDate ? new Date(v.startDate).toLocaleDateString() : 'Now' %> -
+                      <%= v.endDate ? new Date(v.endDate).toLocaleDateString() : 'No expiry' %>
+                    </div>
+                  </div>
+                  <% if (!v.status) { %>
+                    <form method="POST" action="/vouchers/claim/<%= v.voucherId %>" class="mt-3">
+                      <button type="submit" class="btn btn-sm btn-primary w-100">Claim</button>
+                    </form>
+                  <% } else { %>
+                    <button class="btn btn-sm btn-secondary w-100 mt-3" disabled>Already claimed</button>
+                  <% } %>
+                </div>
+              </div>
+            <% }); %>
+          </div>
+        <% } else { %>
+          <div class="text-muted">No vouchers are currently available.</div>
+        <% } %>
+      </div>
+    </div>
+
+    <div class="card mb-4 shadow-sm card-border">
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <strong>Your vouchers</strong>
+        <form class="d-flex" method="POST" action="/vouchers/apply">
+          <input type="text" class="form-control form-control-sm me-2" name="code" placeholder="Enter code" required>
+          <button class="btn btn-sm btn-outline-primary" type="submit">Apply</button>
+        </form>
+      </div>
+      <div class="card-body">
+        <% if (myVouchers && myVouchers.length) { %>
+          <div class="table-responsive">
+            <table class="table table-sm align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th>Code</th>
+                  <th>Details</th>
+                  <th>Status</th>
+                  <th style="width:160px"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <% myVouchers.forEach(function(v) { %>
+                  <tr>
+                    <td><strong><%= v.code %></strong></td>
+                    <td>
+                      <div><%= v.description || '' %></div>
+                      <small class="text-muted"><%= v.discountType === 'percent' ? (v.discountValue + '% off') : ('$' + Number(v.discountValue || 0).toFixed(2) + ' off') %> · Min spend $<%= Number(v.minSpend || 0).toFixed(2) %></small>
+                    </td>
+                    <td>
+                      <span class="badge <%= v.status === 'used' ? 'bg-secondary' : 'bg-success' %>"><%= v.status || 'claimed' %></span>
+                    </td>
+                    <td class="text-end">
+                      <% if (v.status !== 'used') { %>
+                        <form method="POST" action="/vouchers/apply" class="d-inline">
+                          <input type="hidden" name="code" value="<%= v.code %>">
+                          <button class="btn btn-sm btn-primary">Apply at checkout</button>
+                        </form>
+                      <% } else { %>
+                        <small class="text-muted">Used</small>
+                      <% } %>
+                    </td>
+                  </tr>
+                <% }); %>
+              </tbody>
+            </table>
+          </div>
+        <% } else { %>
+          <div class="text-muted">You have not claimed any vouchers yet.</div>
+        <% } %>
+      </div>
+    </div>
+
+    <div class="text-end">
+      <a href="/checkout" class="btn btn-success">Go to checkout</a>
+    </div>
+  </div>
+</body>
+</html>

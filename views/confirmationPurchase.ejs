@@ -149,6 +149,12 @@
               <th class="text-end">Shipping</th>
               <td class="text-end">$<%= Number(typeof shipping !== 'undefined' ? shipping : 0).toFixed(2) %></td>
             </tr>
+            <% if (voucher) { %>
+              <tr>
+                <th class="text-end">Voucher (<%= voucher.code %>)</th>
+                <th class="text-end text-success">- $<%= Number(typeof voucherDiscount !== 'undefined' ? voucherDiscount : 0).toFixed(2) %></th>
+              </tr>
+            <% } %>
             <tr class="table-active">
               <th class="text-end">Total</th>
               <th class="text-end">$<%= Number(typeof total !== 'undefined' ? total : 0).toFixed(2) %></th>
@@ -157,6 +163,12 @@
         </table>
 
         <% if (!invoice) { %>
+          <div class="mb-2">
+            <% if (voucher && voucherDiscount === 0 && voucherReason) { %>
+              <div class="alert alert-warning py-2 mb-2">Voucher applied but not eligible: <%= voucherReason %>.</div>
+            <% } %>
+            <a href="/vouchers" class="btn btn-outline-primary w-100 mb-2">Manage vouchers</a>
+          </div>
           <form id="confirm-form" action="/checkout/confirm" method="POST">
             <% /* include a simple CSRF/token field here if you use one */ %>
             <% if (orderId) { %>
