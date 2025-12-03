@@ -96,6 +96,49 @@ const Purchase = {
     });
   },
 
+  // Fetch a single purchase (with items) for a user
+  getWithItems: function(purchaseId, userId, callback) {
+    const sql = `
+      SELECT
+        p.purchaseId, p.userId, p.subtotal, p.tax, p.shipping, p.total,
+        p.paymentMethod, p.paymentDetails, p.created_at,
+        pi.purchaseItemId, pi.productId, pi.productName, pi.price, pi.quantity, pi.lineTotal, pi.image
+      FROM purchases p
+      LEFT JOIN purchase_items pi ON p.purchaseId = pi.purchaseId
+      WHERE p.purchaseId = ? AND p.userId = ?
+    `;
+    db.query(sql, [purchaseId, userId], function(err, rows) {
+      if (err) return callback(err);
+      if (!rows || !rows.length) return callback(null, null);
+      const base = {
+        purchaseId: rows[0].purchaseId,
+        userId: rows[0].userId,
+        subtotal: Number(rows[0].subtotal || 0),
+        tax: Number(rows[0].tax || 0),
+        shipping: Number(rows[0].shipping || 0),
+        total: Number(rows[0].total || 0),
+        paymentMethod: rows[0].paymentMethod,
+        paymentDetails: rows[0].paymentDetails,
+        created_at: rows[0].created_at,
+        items: []
+      };
+      rows.forEach((r) => {
+        if (r.purchaseItemId) {
+          base.items.push({
+            purchaseItemId: r.purchaseItemId,
+            productId: r.productId,
+            productName: r.productName,
+            price: Number(r.price || 0),
+            quantity: Number(r.quantity || 0),
+            lineTotal: Number(r.lineTotal || 0),
+            image: r.image
+          });
+        }
+      });
+      return callback(null, base);
+    });
+  },
+
   // List all purchases with user info (admin)
   listAll: function(callback) {
     const sql = `

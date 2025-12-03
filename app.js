@@ -7,6 +7,7 @@ const UserController = require('./controllers/UserController');
 const CartItemController = require('./controllers/CartItemController');
 const FavouriteController = require('./controllers/FavouriteController');
 const PurchaseController = require('./controllers/PurchaseController');
+const PurchaseItemController = require('./controllers/PurchaseItemController');
 const Purchase = require('./models/Purchase');
 const { checkAuthenticated, checkAdmin, validateRegistration } = require('./middleware');
 
@@ -67,6 +68,11 @@ app.get('/inventory', checkAuthenticated, checkAdmin, (req, res) => {
 // Shopping (all authenticated users) - list products via controller, render shopping.ejs
 app.get('/shopping', checkAuthenticated, ProductController.listForShopping);
 
+
+// View single product detail
+app.get('/product/:id', checkAuthenticated, (req, res) => {
+    ProductController.getById(req, res);
+});
 // ------------------ Cart routes (DB-backed, MVC) ------------------
 // Use CartItemController methods (function-based model/controller)
 
@@ -253,10 +259,25 @@ app.get('/manageusers', checkAuthenticated, checkAdmin, (req, res) => {
 app.get('/purchases', checkAuthenticated, (req, res) => {
     PurchaseController.listByUser(req, res);
 });
+// Reorder past purchase items -> adds back to cart
+app.post('/purchases/:purchaseId/reorder', checkAuthenticated, (req, res) => {
+    PurchaseController.reorder(req, res);
+});
 
 // Manage all orders (admin)
 app.get('/manageorders', checkAuthenticated, checkAdmin, (req, res) => {
     PurchaseController.listAll(req, res);
+});
+
+// Admin purchase item helpers
+app.get('/admin/purchase/:purchaseId/items', checkAuthenticated, checkAdmin, (req, res) => {
+    PurchaseItemController.listByPurchase(req, res);
+});
+app.post('/admin/purchase/items', checkAuthenticated, checkAdmin, (req, res) => {
+    PurchaseItemController.create(req, res);
+});
+app.post('/admin/purchase/items/:id/delete', checkAuthenticated, checkAdmin, (req, res) => {
+    PurchaseItemController.remove(req, res);
 });
 
 // Get user by id (admin)
