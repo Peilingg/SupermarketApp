@@ -4,6 +4,7 @@ const flash = require('connect-flash');
 const multer = require('multer');
 const dotenv = require('dotenv');
 const checkoutNodejssdk = require('@paypal/checkout-server-sdk');
+const axios = require('axios');
 const ProductController = require('./controllers/ProductController');
 const UserController = require('./controllers/UserController');
 const CartItemController = require('./controllers/CartItemController');
@@ -12,6 +13,7 @@ const PurchaseController = require('./controllers/PurchaseController');
 const PurchaseItemController = require('./controllers/PurchaseItemController');
 const UserVoucherController = require('./controllers/UserVoucherController');
 const VoucherController = require('./controllers/VoucherController');
+const RefundController = require('./controllers/RefundController');
 const Purchase = require('./models/Purchase');
 const Voucher = require('./models/Voucher');
 const CartItem = require('./models/CartItem');
@@ -32,6 +34,7 @@ if (process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_CLIENT_SECRET) {
 } else {
   console.warn('⚠ PayPal credentials not found. PayPal payment will not work. Please set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET in .env');
 }
+
 const app = express();
 
 // Set up multer for file uploads
@@ -344,6 +347,28 @@ app.post('/admin/purchase/items', checkAuthenticated, checkAdmin, (req, res) => 
 });
 app.post('/admin/purchase/items/:id/delete', checkAuthenticated, checkAdmin, (req, res) => {
     PurchaseItemController.remove(req, res);
+});
+
+// Refund Request Routes (User)
+app.post('/refund/request/:purchaseId', checkAuthenticated, (req, res) => {
+    RefundController.requestRefund(req, res);
+});
+app.get('/refundhistory', checkAuthenticated, (req, res) => {
+    RefundController.listByUser(req, res);
+});
+
+// Refund Management Routes (Admin)
+app.get('/managerefunds', checkAuthenticated, checkAdmin, (req, res) => {
+    RefundController.listAll(req, res);
+});
+app.get('/refund/:refundId', checkAuthenticated, checkAdmin, (req, res) => {
+    RefundController.getDetail(req, res);
+});
+app.post('/refund/:refundId/approve', checkAuthenticated, checkAdmin, (req, res) => {
+    RefundController.approve(req, res);
+});
+app.post('/refund/:refundId/reject', checkAuthenticated, checkAdmin, (req, res) => {
+    RefundController.reject(req, res);
 });
 
 // Get user by id (admin)
@@ -701,6 +726,149 @@ app.get('/paypal/return', checkAuthenticated, (req, res) => {
 
 // ==================== End PayPal Routes ====================
 
+// ==================== NETS QR Status SSE ====================
+// Client listens on /sse/payment-status/:txnRetrievalRef and receives { success: true } or { fail: true }
+app.get('/sse/payment-status/:txnRetrievalRef', checkAuthenticated, async (req, res) => {
+  const txnRetrievalRef = req.params.txnRetrievalRef;
+  const courseInitId = req.query.course_init_id || '';
+
+  // Allow headers from EventSourcePolyfill, or fall back to env
+  const apiKey = req.headers['api-key'] || process.env.API_KEY;
+  const projectId = req.headers['project-id'] || process.env.PROJECT_ID;
+  const baseUrl = process.env.NETS_BASE_URL || 'https://sandbox.nets.openapipaas.com';
+
+  // SSE headers
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  // Heartbeat to keep connection alive
+  const heartbeat = setInterval(() => {
+    res.write(': heartbeat\n\n');
+  }, 25000);
+
+  // Poll NETS query API every 3 seconds, up to 5 minutes
+  const startedAt = Date.now();
+  const timeoutMs = 5 * 60 * 1000;
+
+  const poll = async () => {
+    // Stop if timed out
+    if (Date.now() - startedAt > timeoutMs) {
+      res.write(`data: ${JSON.stringify({ fail: true, reason: 'timeout' })}\n\n`);
+      clearInterval(heartbeat);
+      clearInterval(interval);
+      return res.end();
+    }
+
+    try {
+      // Try POST to nets-qr/query (preferred in some NETS docs)
+      const postUrl1 = `${baseUrl}/api/v1/common/payments/nets-qr/query`;
+      let response;
+      try {
+        response = await axios.post(postUrl1, {
+          txn_retrieval_ref: txnRetrievalRef,
+          course_init_id: courseInitId || undefined,
+        }, {
+          headers: {
+            'api-key': apiKey,
+            'project-id': projectId,
+          },
+        });
+      } catch (err1) {
+        // Fallback: GET nets-qr/query with query params
+        const getUrl1 = `${baseUrl}/api/v1/common/payments/nets-qr/query?txn_retrieval_ref=${encodeURIComponent(txnRetrievalRef)}${courseInitId ? `&course_init_id=${encodeURIComponent(courseInitId)}` : ''}`;
+        try {
+          response = await axios.get(getUrl1, {
+            headers: {
+              'api-key': apiKey,
+              'project-id': projectId,
+            },
+          });
+        } catch (err2) {
+          // Second fallback: POST nets/query (alternate path used by some environments)
+          const postUrl2 = `${baseUrl}/api/v1/common/payments/nets/query`;
+          try {
+            response = await axios.post(postUrl2, {
+              txn_retrieval_ref: txnRetrievalRef,
+              course_init_id: courseInitId || undefined,
+            }, {
+              headers: {
+                'api-key': apiKey,
+                'project-id': projectId,
+              },
+            });
+          } catch (err3) {
+            // Final fallback: GET nets/query
+            const getUrl2 = `${baseUrl}/api/v1/common/payments/nets/query?txn_retrieval_ref=${encodeURIComponent(txnRetrievalRef)}${courseInitId ? `&course_init_id=${encodeURIComponent(courseInitId)}` : ''}`;
+            try {
+              response = await axios.get(getUrl2, {
+                headers: {
+                  'api-key': apiKey,
+                  'project-id': projectId,
+                },
+              });
+            } catch (err4) {
+              // If all attempts fail, keep polling but log once
+              console.error('NETS QR query error:', (err4 && err4.response && err4.response.status) ? `HTTP ${err4.response.status}` : (err4.message || err4));
+              return; // continue polling
+            }
+          }
+        }
+      }
+
+      const data = response && response.data && response.data.result && response.data.result.data 
+        ? response.data.result.data 
+        : (response && response.data && response.data.data ? response.data.data : response.data);
+      
+      if (!data) {
+        console.log('No data in NETS response, continuing to poll...');
+        return; // keep polling
+      }
+
+      console.log('NETS query response data:', JSON.stringify(data, null, 2));
+
+      // Interpret NETS statuses:
+      // - response_code === '00' and txn_status === 2 -> success (captured/paid)
+      // - txn_status === 1 can also indicate successful transaction in some environments
+      // - explicit error codes or network_status !== 0 -> fail
+      const txnStatus = Number(data.txn_status);
+      console.log(`NETS transaction status: response_code=${data.response_code}, txn_status=${txnStatus}, network_status=${data.network_status}`);
+
+      // Accept txn_status of 1 or 2 as success (depending on NETS environment/simulator)
+      if ((data.response_code === '00' || data.response_code === '') && (txnStatus === 1 || txnStatus === 2)) {
+        console.log(`Payment successful - txn_status is ${txnStatus}`);
+        res.write(`data: ${JSON.stringify({ success: true, txn_retrieval_ref: txnRetrievalRef })}\n\n`);
+        clearInterval(heartbeat);
+        clearInterval(interval);
+        return res.end();
+      }
+
+      if (data.network_status && Number(data.network_status) !== 0) {
+        console.log('Payment failed - network_status is not 0');
+        res.write(`data: ${JSON.stringify({ fail: true, error: data.error_message || 'network_error' })}\n\n`);
+        clearInterval(heartbeat);
+        clearInterval(interval);
+        return res.end();
+      }
+      // else: still pending (txn_status could be 1 -> created), continue polling
+      console.log('Transaction still pending, will poll again in 3 seconds...');
+    } catch (err) {
+      // On API error, keep polling a few times; if persistent, report fail
+      console.error('NETS QR query error:', err.message || err);
+      if (err.response && err.response.data) {
+        console.error('NETS API response error:', JSON.stringify(err.response.data, null, 2));
+      }
+    }
+  };
+
+  // Start polling
+  const interval = setInterval(poll, 3000);
+  // Run first poll immediately
+  poll();
+});
+
+// ==================== End NETS QR Status SSE ====================
+
 // ==================== NETS QR Routes ====================
 
 // Generate NETS QR Code
@@ -784,5 +952,8 @@ app.get('/nets-qr/fail', checkAuthenticated, (req, res) => {
 
 // ==================== End NETS QR Routes ====================
 
+// --------------------- Start the server ---------------------
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+    console.log(`Server is running on port http://localhost:${PORT}`);
+});

@@ -155,7 +155,7 @@
 
         const txnRetrievalRef = "<%= txnRetrievalRef %>"; // Transaction reference
         const courseInitId = "<%= courseInitId %>"; // Course Init ID
-        const url = `/sse/payment-status/${txnRetrievalRef}`; 
+        const url = `/sse/payment-status/${txnRetrievalRef}?course_init_id=${encodeURIComponent(courseInitId || '')}`; 
    
         const headers = {
             "api-key": "<%= apiKey %>",
@@ -177,11 +177,15 @@
 
             // Check for payment success
             if (data.success) {
+                console.log("✓ Payment Success Event Received!");
                 if (s2sNetsTxnStatus) s2sNetsTxnStatus.close();
                 window.location.href = `/nets-qr/success?txn_retrieval_ref=${txnRetrievalRef}`;
             } else if (data.fail) {
+                console.log("✗ Payment Fail Event Received!");
                 if (s2sNetsTxnStatus) s2sNetsTxnStatus.close();
                 window.location.href = `/nets-qr/fail?txn_retrieval_ref=${txnRetrievalRef}`;
+            } else {
+                console.log("Waiting for payment status... current event:", data);
             }
         });
 

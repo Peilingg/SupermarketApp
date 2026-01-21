@@ -16,8 +16,9 @@ exports.generateQrCode = async (req, res) => {
       notify_mobile: 0,
     };
 
+    const baseUrl = process.env.NETS_BASE_URL || 'https://sandbox.nets.openapipaas.com';
     const response = await axios.post(
-      `https://sandbox.nets.openapipaas.com/api/v1/common/payments/nets-qr/request`,
+      `${baseUrl}/api/v1/common/payments/nets-qr/request`,
       requestBody,
       {
         headers: {
@@ -53,7 +54,7 @@ exports.generateQrCode = async (req, res) => {
       const txnRetrievalRef = qrData.txn_retrieval_ref;
       const courseInitId = getCourseInitIdParam();
 
-      const webhookUrl = `https://sandbox.nets.openapipaas.com/api/v1/common/payments/nets/webhook?txn_retrieval_ref=${txnRetrievalRef}&course_init_id=${courseInitId}`;
+      const webhookUrl = `${baseUrl}/api/v1/common/payments/nets/webhook?txn_retrieval_ref=${txnRetrievalRef}&course_init_id=${courseInitId}`;
 
       console.log("Transaction retrieval ref:" + txnRetrievalRef);
       console.log("courseInitId:" + courseInitId);
