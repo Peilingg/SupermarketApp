@@ -110,7 +110,7 @@
         <div class="mb-3 summary-box">
           <h6>Payment</h6>
           <% 
-            const methods = paymentMethods || ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'PayNow'];
+            const methods = paymentMethods || ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'PayNow', 'PayPal', 'NETS QR'];
             const selectedMethod = paymentMethod || methods[0];
           %>
           <% if (!invoice) { %>
@@ -121,6 +121,8 @@
                   <div>
                     <div class="fw-semibold"><%= m %></div>
                     <% if (m === 'PayNow') { %><small class="text-muted">PayNow UEN: 20241234A</small><% } %>
+                    <% if (m === 'PayPal') { %><small class="text-muted">Secure PayPal checkout</small><% } %>
+                    <% if (m === 'NETS QR') { %><small class="text-muted">Scan QR code with your bank app</small><% } %>
                   </div>
                 </label>
               <% }); %>
@@ -189,11 +191,26 @@
     document.addEventListener('DOMContentLoaded', function() {
       const summaryEl = document.getElementById('payment-method-summary');
       const radios = document.querySelectorAll('.payment-choice');
+      const confirmForm = document.getElementById('confirm-form');
+      const paymentBtn = document.getElementById('paymentBtn');
+
       radios.forEach(r => {
         r.addEventListener('change', function() {
           if (this.checked && summaryEl) summaryEl.textContent = this.value;
         });
       });
+
+      // Handle PayPal payment submission
+      if (confirmForm && paymentBtn) {
+        confirmForm.addEventListener('submit', function(e) {
+          const selectedMethod = document.querySelector('input[name="paymentMethod"]:checked');
+          if (selectedMethod && selectedMethod.value === 'PayPal') {
+            e.preventDefault();
+            // Store the payment method and submit to PayPal
+            window.location.href = '/checkout/confirm';
+          }
+        });
+      }
     });
   </script>
   <% } %>
