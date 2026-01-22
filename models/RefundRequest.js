@@ -19,7 +19,7 @@ const RefundRequest = {
       SELECT
         rr.refundRequestId, rr.purchaseId, rr.userId, rr.reason, rr.status,
         rr.requested_at, rr.admin_notes, rr.processed_at,
-        p.total as refund_amount,
+        p.total as refund_amount, p.created_at as purchase_date,
         u.username, u.email
       FROM refund_requests rr
       JOIN purchases p ON rr.purchaseId = p.purchaseId
@@ -108,7 +108,7 @@ const RefundRequest = {
       if (results[0].status !== 'pending') return callback(new Error('Refund is not in pending status'));
 
       const userId = results[0].userId;
-      const refundAmount = results[0].total;
+      const refundAmount = Number(results[0].total || 0);
 
       // Update refund request status to approved
       const updateRefundSql = `

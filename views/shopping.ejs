@@ -52,8 +52,16 @@
 <body>
   <%- include('partials/navbar2') %>
 
-  <div class="container mt-4">
-    <p>Welcome, <%= user ? user.username : 'Guest' %> <%= user ? '(' + user.role + ')' : '' %></p>
+  <div class="container mt-4">    <% if (errors && errors.length) { %>
+      <div class="alert alert-danger">
+        <% errors.forEach(function(msg){ %><div><%= msg %></div><% }); %>
+      </div>
+    <% } %>
+    <% if (success && success.length) { %>
+      <div class="alert alert-success">
+        <% success.forEach(function(msg){ %><div><%= msg %></div><% }); %>
+      </div>
+    <% } %>    <p>Welcome, <%= user ? user.username : 'Guest' %> <%= user ? '(' + user.role + ')' : '' %></p>
     <div class="text-center mb-4"><h2>Products from Supermarket App Database</h2></div>
 
     <!-- Category filter -->

@@ -124,6 +124,18 @@
               <th class="text-end">Shipping</th>
               <td class="text-end">$<%= Number(typeof shipping !== 'undefined' ? shipping : 0).toFixed(2) %></td>
             </tr>
+            <% if (typeof voucher !== 'undefined' && voucher && typeof voucherDiscount !== 'undefined' && voucherDiscount > 0) { %>
+              <tr>
+                <th class="text-end">Voucher (<%= voucher.code %>)</th>
+                <th class="text-end text-success">- $<%= Number(voucherDiscount).toFixed(2) %></th>
+              </tr>
+            <% } %>
+            <% if (typeof storeCreditUsed !== 'undefined' && storeCreditUsed > 0) { %>
+              <tr>
+                <th class="text-end">Store Credit Used</th>
+                <th class="text-end text-success">- $<%= Number(storeCreditUsed).toFixed(2) %></th>
+              </tr>
+            <% } %>
             <tr class="table-active">
               <th class="text-end">Total</th>
               <th class="text-end">$<%= Number(typeof total !== 'undefined' ? total : 0).toFixed(2) %></th>

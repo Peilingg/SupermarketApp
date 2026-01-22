@@ -15,6 +15,16 @@
 </head>
 <body>
   <div class="container my-4">
+    <% if (errors && errors.length) { %>
+      <div class="alert alert-danger">
+        <% errors.forEach(function(msg){ %><div><%= msg %></div><% }); %>
+      </div>
+    <% } %>
+    <% if (success && success.length) { %>
+      <div class="alert alert-success">
+        <% success.forEach(function(msg){ %><div><%= msg %></div><% }); %>
+      </div>
+    <% } %>
     <div class="d-flex justify-content-between align-items-center mb-3">
       <h2 class="mb-0"><%= invoice ? 'Invoice' : 'Confirm Purchase' %></h2>
       <% if (!invoice) { %>
@@ -141,16 +151,33 @@
           <tbody>
             <tr>
               <th class="text-end">Subtotal</th>
-              <td class="text-end">$<%= Number(typeof subtotal !== 'undefined' ? subtotal : 0).toFixed(2) %></td>
+              <td class="text-end" id="subtotal-amount">$<%= Number(typeof subtotal !== 'undefined' ? subtotal : 0).toFixed(2) %></td>
             </tr>
             <tr>
               <th class="text-end">Tax</th>
-              <td class="text-end">$<%= Number(typeof tax !== 'undefined' ? tax : 0).toFixed(2) %></td>
+              <td class="text-end" id="tax-amount">$<%= Number(typeof tax !== 'undefined' ? tax : 0).toFixed(2) %></td>
             </tr>
             <tr>
               <th class="text-end">Shipping</th>
-              <td class="text-end">$<%= Number(typeof shipping !== 'undefined' ? shipping : 0).toFixed(2) %></td>
+              <td class="text-end" id="shipping-amount">$<%= Number(typeof shipping !== 'undefined' ? shipping : 0).toFixed(2) %></td>
             </tr>
+            <% if (!invoice) { %>
+              <% 
+                const userStoreCredit = Number(user && user.store_credit ? user.store_credit : 0);
+              %>
+              <% if (userStoreCredit > 0) { %>
+                <tr>
+                  <th class="text-end">
+                    <div class="form-check form-switch d-inline-flex align-items-center">
+                      <input class="form-check-input me-2" type="checkbox" id="useStoreCreditToggle" style="cursor: pointer;">
+                      <label class="form-check-label" for="useStoreCreditToggle" style="cursor: pointer;">Use Store Credit</label>
+                    </div>
+                    <div><small class="text-muted">Available: $<%= userStoreCredit.toFixed(2) %></small></div>
+                  </th>
+                  <th class="text-end text-success" id="store-credit-discount" style="display: none;">- $<span id="store-credit-amount">0.00</span></th>
+                </tr>
+              <% } %>
+            <% } %>
             <% if (voucher) { %>
               <tr>
                 <th class="text-end">Voucher (<%= voucher.code %>)</th>
@@ -159,7 +186,7 @@
             <% } %>
             <tr class="table-active">
               <th class="text-end">Total</th>
-              <th class="text-end">$<%= Number(typeof total !== 'undefined' ? total : 0).toFixed(2) %></th>
+              <th class="text-end" id="total-amount">$<%= Number(typeof total !== 'undefined' ? total : 0).toFixed(2) %></th>
             </tr>
           </tbody>
         </table>
@@ -176,6 +203,8 @@
             <% if (orderId) { %>
               <input type="hidden" name="orderId" value="<%= orderId %>">
             <% } %>
+            <input type="hidden" name="useStoreCredit" id="useStoreCreditInput" value="false">
+            <input type="hidden" name="storeCreditUsed" id="storeCreditUsedInput" value="0">
             <button type="submit" class="btn btn-success w-100">Confirm & Pay</button>
           </form>
           <a href="/cart" class="btn btn-outline-secondary w-100 mt-2">Edit Cart</a>
@@ -194,19 +223,52 @@
       const confirmForm = document.getElementById('confirm-form');
       const paymentBtn = document.getElementById('paymentBtn');
 
+      // Store credit toggle handling
+      const storeCreditToggle = document.getElementById('useStoreCreditToggle');
+      const storeCreditDiscountRow = document.getElementById('store-credit-discount');
+      const storeCreditAmountSpan = document.getElementById('store-credit-amount');
+      const totalAmountEl = document.getElementById('total-amount');
+      const useStoreCreditInput = document.getElementById('useStoreCreditInput');
+      const storeCreditUsedInput = document.getElementById('storeCreditUsedInput');
+
+      if (storeCreditToggle) {
+        // Data values from EJS
+        const subtotal = <%= (typeof subtotal !== 'undefined' ? subtotal : 0) %>;
+        const tax = <%= (typeof tax !== 'undefined' ? tax : 0) %>;
+        const shipping = <%= (typeof shipping !== 'undefined' ? shipping : 0) %>;
+        const voucherDiscount = <%= (typeof voucherDiscount !== 'undefined' ? voucherDiscount : 0) %>;
+        const availableCredit = <%= (user && user.store_credit ? user.store_credit : 0) %>;
+        const baseTotal = subtotal + tax + shipping - voucherDiscount;
+
+        storeCreditToggle.addEventListener('change', function() {
+          if (this.checked) {
+            const creditToUse = Math.min(availableCredit, baseTotal);
+            const newTotal = Math.max(0, baseTotal - creditToUse);
+            storeCreditAmountSpan.textContent = creditToUse.toFixed(2);
+            storeCreditDiscountRow.style.display = '';
+            totalAmountEl.textContent = '$' + newTotal.toFixed(2);
+            useStoreCreditInput.value = 'true';
+            storeCreditUsedInput.value = creditToUse.toFixed(2);
+          } else {
+            storeCreditDiscountRow.style.display = 'none';
+            totalAmountEl.textContent = '$' + baseTotal.toFixed(2);
+            useStoreCreditInput.value = 'false';
+            storeCreditUsedInput.value = '0';
+          }
+        });
+      }
+
       radios.forEach(r => {
         r.addEventListener('change', function() {
           if (this.checked && summaryEl) summaryEl.textContent = this.value;
         });
       });
 
-      // Handle PayPal payment submission
       if (confirmForm && paymentBtn) {
         confirmForm.addEventListener('submit', function(e) {
           const selectedMethod = document.querySelector('input[name="paymentMethod"]:checked');
           if (selectedMethod && selectedMethod.value === 'PayPal') {
             e.preventDefault();
-            // Store the payment method and submit to PayPal
             window.location.href = '/checkout/confirm';
           }
         });

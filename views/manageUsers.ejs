@@ -20,7 +20,6 @@
       <div class="text-muted small">Admin – view and edit all accounts</div>
     </div>
 
-    <% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
     <% if (success && success.length > 0) { %>
       <div class="alert alert-success">
         <% success.forEach(function(msg){ %><div><%= msg %></div><% }); %>

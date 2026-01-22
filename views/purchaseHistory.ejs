@@ -50,24 +50,9 @@
         <% errors.forEach(function(msg){ %><div><%= msg %></div><% }); %>
       </div>
     <% } %>
-    <% if (error && error.length) { %>
-      <div class="alert alert-danger">
-        <% error.forEach(function(msg){ %><div><%= msg %></div><% }); %>
-      </div>
-    <% } %>
     <% if (success && success.length) { %>
       <div class="alert alert-success">
         <% success.forEach(function(msg){ %><div><%= msg %></div><% }); %>
-      </div>
-    <% } %>
-    <% if (message && message.success) { %>
-      <div class="alert alert-success">
-        <%= message.success %>
-      </div>
-    <% } %>
-    <% if (message && message.error) { %>
-      <div class="alert alert-danger">
-        <%= message.error %>
       </div>
     <% } %>
 

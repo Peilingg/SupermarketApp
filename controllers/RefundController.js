@@ -113,8 +113,14 @@ const RefundController = {
       // Get purchase items
       Purchase.getWithItems(refund.purchaseId, null, function(purchaseErr, purchase) {
         if (purchaseErr) {
+          console.error('RefundController.getDetail - Purchase error:', purchaseErr);
           req.flash && req.flash('error', 'Error loading purchase details.');
           return res.redirect('/managerefunds');
+        }
+
+        // If purchase not found, create empty object with empty items array
+        if (!purchase) {
+          purchase = { items: [] };
         }
 
         return res.render('refundDetail', {
@@ -146,7 +152,8 @@ const RefundController = {
         return res.redirect('/managerefunds');
       }
 
-      req.flash && req.flash('success', `Refund of $${result.refundAmount.toFixed(2)} has been approved and added as store credit.`);
+      const refundAmount = Number(result.refundAmount || 0);
+      req.flash && req.flash('success', `Refund of $${refundAmount.toFixed(2)} has been approved and added as store credit.`);
       return res.redirect('/managerefunds');
     });
   },

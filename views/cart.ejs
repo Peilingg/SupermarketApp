@@ -17,6 +17,17 @@
   <div class="container my-4">
     <h2>Your Cart</h2>
 
+    <% if (errors && errors.length) { %>
+      <div class="alert alert-danger">
+        <% errors.forEach(function(msg){ %><div><%= msg %></div><% }); %>
+      </div>
+    <% } %>
+    <% if (success && success.length) { %>
+      <div class="alert alert-success">
+        <% success.forEach(function(msg){ %><div><%= msg %></div><% }); %>
+      </div>
+    <% } %>
+
     <% 
       const rawItems = typeof items !== 'undefined' ? items : (typeof cart !== 'undefined' ? cart : []);
       const cartItems = Array.isArray(rawItems) ? rawItems.filter(Boolean) : [];

@@ -98,16 +98,24 @@ const Purchase = {
 
   // Fetch a single purchase (with items) for a user
   getWithItems: function(purchaseId, userId, callback) {
-    const sql = `
+    let sql = `
       SELECT
         p.purchaseId, p.userId, p.subtotal, p.tax, p.shipping, p.total,
         p.paymentMethod, p.paymentDetails, p.created_at,
         pi.purchaseItemId, pi.productId, pi.productName, pi.price, pi.quantity, pi.lineTotal, pi.image
       FROM purchases p
       LEFT JOIN purchase_items pi ON p.purchaseId = pi.purchaseId
-      WHERE p.purchaseId = ? AND p.userId = ?
+      WHERE p.purchaseId = ?
     `;
-    db.query(sql, [purchaseId, userId], function(err, rows) {
+    const params = [purchaseId];
+    
+    // If userId is provided, also filter by userId (for user verification)
+    if (userId !== null && userId !== undefined) {
+      sql += ` AND p.userId = ?`;
+      params.push(userId);
+    }
+    
+    db.query(sql, params, function(err, rows) {
       if (err) return callback(err);
       if (!rows || !rows.length) return callback(null, null);
       const base = {

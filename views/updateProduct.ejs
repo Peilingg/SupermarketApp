@@ -15,6 +15,17 @@
   <div class="container mt-4">
     <h2 class="text-center mb-4">Update Product</h2>
     
+    <% if (errors && errors.length) { %>
+      <div class="alert alert-danger">
+        <% errors.forEach(function(msg){ %><div><%= msg %></div><% }); %>
+      </div>
+    <% } %>
+    <% if (success && success.length) { %>
+      <div class="alert alert-success">
+        <% success.forEach(function(msg){ %><div><%= msg %></div><% }); %>
+      </div>
+    <% } %>
+    
     <% if (product) { %>
       <form action="/updateProduct/<%= product.productId %>" method="POST" enctype="multipart/form-data" class="mx-auto" style="max-width: 500px;">
         

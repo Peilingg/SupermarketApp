@@ -406,41 +406,50 @@ app.post('/cart/checkout', checkAuthenticated, (req, res) => {
 app.get('/checkout', checkAuthenticated, (req, res) => {
   const CartItem = require('./models/CartItem');
   const Product = require('./models/Product');
+  const User = require('./models/User');
   const sessionUser = req.session && req.session.user;
   if (!sessionUser || !sessionUser.userId) return res.redirect('/login');
 
   const paymentMethods = ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'PayNow', 'PayPal', 'NETS QR'];
   const paymentMethod = req.query.paymentMethod || paymentMethods[0];
 
-  CartItem.listAll(sessionUser.userId, (err, items) => {
-    if (err) return res.status(500).send('Server error');
+  // Fetch full user data including store_credit
+  User.getById(sessionUser.userId, (userErr, fullUser) => {
+    if (userErr || !fullUser) {
+      console.error('Failed to fetch user data:', userErr);
+      fullUser = sessionUser; // fallback to session user
+    }
 
-    const mapped = (items || []).map(it => {
-      const price = Number(it.price || it.unitPrice || 0);
-      const qty = Number(it.quantity || it.qty || 0);
-      return Object.assign({}, it, { price, quantity: qty, lineTotal: +(price * qty) });
-    });
+    CartItem.listAll(sessionUser.userId, (err, items) => {
+      if (err) return res.status(500).send('Server error');
 
-    const subtotal = mapped.reduce((s, i) => s + (i.lineTotal || 0), 0);
-    const tax = +((subtotal * 0.07)).toFixed(2);             // adjust tax rule if needed
-    const shipping = +(subtotal > 50 ? 0 : 5).toFixed(2);     // adjust shipping rule if needed
-    const appliedVoucher = req.session.appliedVoucher || null;
-    const voucherCalc = VoucherController.computeDiscount(appliedVoucher, subtotal);
-    const voucherDiscount = +(voucherCalc.discount || 0).toFixed(2);
-    const total = +(subtotal + tax + shipping - voucherDiscount).toFixed(2);
+      const mapped = (items || []).map(it => {
+        const price = Number(it.price || it.unitPrice || 0);
+        const qty = Number(it.quantity || it.qty || 0);
+        return Object.assign({}, it, { price, quantity: qty, lineTotal: +(price * qty) });
+      });
 
-    res.render('confirmationPurchase', {
-      user: req.session.user,
-      items: mapped,
-      subtotal, tax, shipping, total,
-      voucher: appliedVoucher,
-      voucherDiscount,
-      voucherReason: voucherCalc.reason || null,
-      invoice: false,
-      paymentMethod,
-      paymentDetails: null,
-      paymentMethods,
-      orderId: null
+      const subtotal = mapped.reduce((s, i) => s + (i.lineTotal || 0), 0);
+      const tax = +((subtotal * 0.07)).toFixed(2);             // adjust tax rule if needed
+      const shipping = +(subtotal > 50 ? 0 : 5).toFixed(2);     // adjust shipping rule if needed
+      const appliedVoucher = req.session.appliedVoucher || null;
+      const voucherCalc = VoucherController.computeDiscount(appliedVoucher, subtotal);
+      const voucherDiscount = +(voucherCalc.discount || 0).toFixed(2);
+      const total = +(subtotal + tax + shipping - voucherDiscount).toFixed(2);
+
+      res.render('confirmationPurchase', {
+        user: fullUser,
+        items: mapped,
+        subtotal, tax, shipping, total,
+        voucher: appliedVoucher,
+        voucherDiscount,
+        voucherReason: voucherCalc.reason || null,
+        invoice: false,
+        paymentMethod,
+        paymentDetails: null,
+        paymentMethods,
+        orderId: null
+      });
     });
   });
 });
@@ -468,7 +477,12 @@ app.post('/checkout/confirm', checkAuthenticated, (req, res) => {
     const appliedVoucher = req.session.appliedVoucher || null;
     const voucherCalc = VoucherController.computeDiscount(appliedVoucher, subtotal);
     const voucherDiscount = +(voucherCalc.discount || 0).toFixed(2);
-    const total = +(subtotal + tax + shipping - voucherDiscount).toFixed(2);
+    
+    // Handle store credit
+    const useStoreCredit = req.body.useStoreCredit === 'true';
+    const storeCreditUsed = useStoreCredit ? parseFloat(req.body.storeCreditUsed || 0) : 0;
+    const baseTotal = +(subtotal + tax + shipping - voucherDiscount).toFixed(2);
+    const total = +(Math.max(0, baseTotal - storeCreditUsed)).toFixed(2);
 
     // PAYPAL PAYMENT HANDLING
     if (paymentMethod === 'PayPal') {
@@ -596,12 +610,20 @@ app.post('/checkout/confirm', checkAuthenticated, (req, res) => {
       shipping,
       total,
       paymentMethod,
-      paymentDetails: paymentDetails + (appliedVoucher && voucherDiscount > 0 ? ` | Voucher ${appliedVoucher.code} (-$${voucherDiscount.toFixed(2)})` : '')
+      paymentDetails: paymentDetails + (appliedVoucher && voucherDiscount > 0 ? ` | Voucher ${appliedVoucher.code} (-$${voucherDiscount.toFixed(2)})` : '') + (storeCreditUsed > 0 ? ` | Store Credit (-$${storeCreditUsed.toFixed(2)})` : '')
     };
 
     Purchase.record(sessionUser.userId, summary, mapped, (saveErr, purchaseId) => {
       if (saveErr) console.error('Checkout confirm -> save purchase failed', saveErr);
       const finalOrderId = purchaseId || orderId;
+
+      // Deduct store credit from user account if used
+      if (!saveErr && storeCreditUsed > 0) {
+        const deductSql = 'UPDATE users SET store_credit = store_credit - ? WHERE userId = ? AND store_credit >= ?';
+        require('./db').query(deductSql, [storeCreditUsed, sessionUser.userId, storeCreditUsed], (creditErr) => {
+          if (creditErr) console.error('Failed to deduct store credit', creditErr);
+        });
+      }
 
       if (!saveErr && appliedVoucher && voucherDiscount > 0 && appliedVoucher.userVoucherId) {
         Voucher.markUsed(appliedVoucher.userVoucherId, (vErr) => {
@@ -619,6 +641,7 @@ app.post('/checkout/confirm', checkAuthenticated, (req, res) => {
           subtotal, tax, shipping, total,
           voucher: appliedVoucher,
           voucherDiscount,
+          storeCreditUsed,
           invoice: true,
           paymentMethod,
           paymentDetails,

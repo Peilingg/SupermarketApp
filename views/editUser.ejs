@@ -12,7 +12,16 @@
   <div class="container my-5" style="max-width:720px;">
     <h3>Edit Profile</h3>
 
-    <% if (error) { %><div class="alert alert-danger"><%= error %></div><% } %>
+    <% if (errors && errors.length) { %>
+      <div class="alert alert-danger">
+        <% errors.forEach(function(msg){ %><div><%= msg %></div><% }); %>
+      </div>
+    <% } %>
+    <% if (success && success.length) { %>
+      <div class="alert alert-success">
+        <% success.forEach(function(msg){ %><div><%= msg %></div><% }); %>
+      </div>
+    <% } %>
 
     <form action="<%= action %>" method="post" class="mt-3">
       <div class="mb-3">

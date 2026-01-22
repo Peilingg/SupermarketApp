@@ -13,6 +13,16 @@
     <%- include('partials/navbar') %>
 
     <div class="container">
+        <% if (errors && errors.length) { %>
+          <div class="alert alert-danger mt-3">
+            <% errors.forEach(function(msg){ %><div><%= msg %></div><% }); %>
+          </div>
+        <% } %>
+        <% if (success && success.length) { %>
+          <div class="alert alert-success mt-3">
+            <% success.forEach(function(msg){ %><div><%= msg %></div><% }); %>
+          </div>
+        <% } %>
         <p>Welcome, <%= user.username %> (<%= user.role %>)</p>
         <br>
         <div class="text-center"><h2>Product Details</h2></div>

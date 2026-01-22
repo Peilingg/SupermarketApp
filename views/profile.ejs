@@ -10,9 +10,17 @@
   <%- include('partials/navbar') %>
 
   <div class="container my-5">
-    <% if (error) { %>
-      <div class="alert alert-danger"><%= error %></div>
-    <% } else if (!user) { %>
+    <% if (errors && errors.length) { %>
+      <div class="alert alert-danger">
+        <% errors.forEach(function(msg){ %><div><%= msg %></div><% }); %>
+      </div>
+    <% } %>
+    <% if (success && success.length) { %>
+      <div class="alert alert-success">
+        <% success.forEach(function(msg){ %><div><%= msg %></div><% }); %>
+      </div>
+    <% } %>
+    <% if (!user) { %>
       <div class="alert alert-warning">User not found.</div>
     <% } else { %>
     <p class="text-center" style="font-size:35px;"><strong>My Profile </strong></p>
