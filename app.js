@@ -3,7 +3,6 @@ const session = require('express-session');
 const flash = require('connect-flash');
 const multer = require('multer');
 const dotenv = require('dotenv');
-const checkoutNodejssdk = require('@paypal/checkout-server-sdk');
 const axios = require('axios');
 const ProductController = require('./controllers/ProductController');
 const UserController = require('./controllers/UserController');
@@ -19,20 +18,16 @@ const Voucher = require('./models/Voucher');
 const CartItem = require('./models/CartItem');
 const { checkAuthenticated, checkAdmin, validateRegistration } = require('./middleware');
 const netsService = require('./services/nets');
+const paypalService = require('./services/paypal');
 
 // Load environment variables
 dotenv.config();
 
-// Configure PayPal SDK
-let paypalClient = null;
-if (process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_CLIENT_SECRET) {
-  const paypalEnv = process.env.PAYPAL_MODE === 'live'
-    ? new checkoutNodejssdk.core.LiveEnvironment(process.env.PAYPAL_CLIENT_ID, process.env.PAYPAL_CLIENT_SECRET)
-    : new checkoutNodejssdk.core.SandboxEnvironment(process.env.PAYPAL_CLIENT_ID, process.env.PAYPAL_CLIENT_SECRET);
-  paypalClient = new checkoutNodejssdk.core.PayPalHttpClient(paypalEnv);
-  console.log('✓ PayPal SDK configured');
+// Verify PayPal configuration
+if (process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_CLIENT_SECRET && process.env.PAYPAL_API) {
+  console.log('✓ PayPal service configured');
 } else {
-  console.warn('⚠ PayPal credentials not found. PayPal payment will not work. Please set PAYPAL_CLIENT_ID and PAYPAL_CLIENT_SECRET in .env');
+  console.warn('⚠ PayPal credentials not found. PayPal payment will not work. Please set PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, and PAYPAL_API in .env');
 }
 
 const app = express();
@@ -410,7 +405,7 @@ app.get('/checkout', checkAuthenticated, (req, res) => {
   const sessionUser = req.session && req.session.user;
   if (!sessionUser || !sessionUser.userId) return res.redirect('/login');
 
-  const paymentMethods = ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'PayNow', 'PayPal', 'NETS QR'];
+  const paymentMethods = ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'E-Wallet', 'PayPal', 'NETS QR'];
   const paymentMethod = req.query.paymentMethod || paymentMethods[0];
 
   // Fetch full user data including store_credit
@@ -437,6 +432,15 @@ app.get('/checkout', checkAuthenticated, (req, res) => {
       const voucherDiscount = +(voucherCalc.discount || 0).toFixed(2);
       const total = +(subtotal + tax + shipping - voucherDiscount).toFixed(2);
 
+      // Store checkout data in session for PayPal flow
+      req.session.checkoutData = {
+        items: mapped,
+        subtotal, tax, shipping, total,
+        appliedVoucher,
+        voucherDiscount,
+        storeCreditUsed: 0 // Will be updated if user toggles store credit
+      };
+
       res.render('confirmationPurchase', {
         user: fullUser,
         items: mapped,
@@ -448,22 +452,23 @@ app.get('/checkout', checkAuthenticated, (req, res) => {
         paymentMethod,
         paymentDetails: null,
         paymentMethods,
-        orderId: null
+        orderId: null,
+        process: { env: { PAYPAL_CLIENT_ID: process.env.PAYPAL_CLIENT_ID } }
       });
     });
   });
 });
 
 // Confirm + "pay" (handles all payment methods including PayPal)
-app.post('/checkout/confirm', checkAuthenticated, (req, res) => {
+app.post('/checkout/confirm', checkAuthenticated, async (req, res) => {
   const CartItem = require('./models/CartItem');
   const sessionUser = req.session && req.session.user;
   if (!sessionUser || !sessionUser.userId) return res.redirect('/login');
 
-  const paymentMethods = ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'PayNow', 'PayPal', 'NETS QR'];
+  const paymentMethods = ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'E-Wallet', 'PayPal', 'NETS QR'];
   const paymentMethod = req.body.paymentMethod || paymentMethods[0];
 
-  CartItem.listAll(sessionUser.userId, (err, items) => {
+  CartItem.listAll(sessionUser.userId, async (err, items) => {
     if (err) return res.status(500).send('Server error');
     const mapped = (items || []).map(it => {
       const price = Number(it.price || it.unitPrice || 0);
@@ -477,106 +482,83 @@ app.post('/checkout/confirm', checkAuthenticated, (req, res) => {
     const appliedVoucher = req.session.appliedVoucher || null;
     const voucherCalc = VoucherController.computeDiscount(appliedVoucher, subtotal);
     const voucherDiscount = +(voucherCalc.discount || 0).toFixed(2);
-    
-    // Handle store credit
+
+    // Handle store credit and e-wallet
     const useStoreCredit = req.body.useStoreCredit === 'true';
     const storeCreditUsed = useStoreCredit ? parseFloat(req.body.storeCreditUsed || 0) : 0;
+    const useEwallet = req.body.useEwallet === 'true';
+    let ewalletUsed = useEwallet ? parseFloat(req.body.ewalletUsed || 0) : 0;
+
     const baseTotal = +(subtotal + tax + shipping - voucherDiscount).toFixed(2);
-    const total = +(Math.max(0, baseTotal - storeCreditUsed)).toFixed(2);
+
+    // Validate e-wallet amount server-side
+    const { getBalance } = require('./models/EWallet');
+    let validatedEwalletUsed = 0;
+    await new Promise((resolve) => {
+      if (!useEwallet || ewalletUsed <= 0) return resolve();
+      getBalance(sessionUser.userId, (balErr, bal) => {
+        const available = bal && bal.ewallet_balance ? Number(bal.ewallet_balance) : 0;
+        const remainingAfterCredit = Math.max(0, baseTotal - storeCreditUsed);
+        validatedEwalletUsed = Math.max(0, Math.min(ewalletUsed, available, remainingAfterCredit));
+        resolve();
+      });
+    });
+    ewalletUsed = +(+validatedEwalletUsed).toFixed(2);
+    const total = +(Math.max(0, baseTotal - storeCreditUsed - ewalletUsed)).toFixed(2);
+
+    // Determine actual payment method based on store credit/e-wallet usage
+    let actualPaymentMethod = paymentMethod;
+    let actualPaymentDetails = null;
+    
+    // If total is fully covered by store credit + e-wallet, show that as payment method
+    if (total === 0) {
+      if (storeCreditUsed > 0 && ewalletUsed > 0) {
+        actualPaymentMethod = 'Store Credit + E-Wallet';
+        actualPaymentDetails = `Store Credit: $${storeCreditUsed.toFixed(2)} + E-Wallet: $${ewalletUsed.toFixed(2)}`;
+      } else if (storeCreditUsed > 0) {
+        actualPaymentMethod = 'Store Credit';
+        actualPaymentDetails = `Store Credit: $${storeCreditUsed.toFixed(2)}`;
+      } else if (ewalletUsed > 0) {
+        actualPaymentMethod = 'E-Wallet';
+        actualPaymentDetails = `E-Wallet: $${ewalletUsed.toFixed(2)}`;
+      }
+    }
 
     // PAYPAL PAYMENT HANDLING
     if (paymentMethod === 'PayPal') {
-      if (!paypalClient) {
-        req.flash && req.flash('error', 'PayPal is not configured. Please contact support.');
-        return res.redirect('/checkout');
-      }
-
-      const requestBody = {
-        intent: 'CAPTURE',
-        purchase_units: [{
-          amount: {
-            currency_code: 'SGD',
-            value: total.toFixed(2),
-            breakdown: {
-              item_total: {
-                currency_code: 'SGD',
-                value: subtotal.toFixed(2)
-              },
-              tax_total: {
-                currency_code: 'SGD',
-                value: tax.toFixed(2)
-              },
-              shipping: {
-                currency_code: 'SGD',
-                value: shipping.toFixed(2)
-              },
-              discount: {
-                currency_code: 'SGD',
-                value: voucherDiscount.toFixed(2)
-              }
-            }
-          },
-          items: mapped.map(item => ({
-            name: item.productName || item.name || 'Product',
-            sku: item.productId || item.id || 'SKU',
-            unit_amount: {
-              currency_code: 'SGD',
-              value: Number(item.price || item.unitPrice || 0).toFixed(2)
-            },
-            quantity: String(item.quantity || 1)
-          }))
-        }],
-        payer: {
-          email_address: sessionUser.email || 'buyer@example.com',
-          name: {
-            given_name: sessionUser.username || 'Customer'
-          }
-        },
-        application_context: {
-          brand_name: 'Supermarket Store',
-          user_action: 'PAY_NOW',
-          return_url: `${process.env.APP_URL || 'http://localhost:3000'}/paypal/return`,
-          cancel_url: `${process.env.APP_URL || 'http://localhost:3000'}/checkout`
-        }
+      // Store checkout data in session for PayPal flow
+      req.session.checkoutData = {
+        items: mapped,
+        subtotal, tax, shipping, total,
+        appliedVoucher,
+        voucherDiscount,
+        storeCreditUsed,
+        ewalletUsed,
+        paymentMethod: actualPaymentMethod
       };
-
-      try {
-        const request = new checkoutNodejssdk.orders.OrdersCreateRequest();
-        request.prefer('return=representation');
-        request.requestBody(requestBody);
-
-        paypalClient.execute(request)
-          .then(response => {
-            // Save to session for later
-            req.session.paypalOrderId = response.result.id;
-            req.session.checkoutData = {
-              items: mapped,
-              subtotal, tax, shipping, total,
-              appliedVoucher,
-              voucherDiscount
-            };
-
-            // Find PayPal approval link
-            const approvalLink = response.result.links.find(l => l.rel === 'approve');
-            if (approvalLink) {
-              return res.redirect(approvalLink.href);
-            } else {
-              console.error('PayPal response:', response.result);
-              req.flash && req.flash('error', 'Unable to process PayPal payment.');
-              return res.redirect('/checkout');
-            }
-          })
-          .catch(error => {
-            console.error('PayPal error:', error.message || error);
-            req.flash && req.flash('error', 'Failed to create PayPal payment. ' + (error.message || ''));
-            return res.redirect('/checkout');
-          });
-      } catch (error) {
-        console.error('PayPal execution error:', error.message || error);
-        req.flash && req.flash('error', 'PayPal error: ' + (error.message || 'Unknown error'));
-        return res.redirect('/checkout');
-      }
-      return;
+      // Save session before rendering to ensure data persists
+      return req.session.save((saveErr) => {
+        if (saveErr) {
+          console.error('Failed to save session:', saveErr);
+        }
+        // PayPal will be handled by client-side SDK and API endpoints
+        // Client will call /api/paypal/create-order and /api/paypal/capture-order
+        return res.render('confirmationPurchase', {
+          user: sessionUser,
+          items: mapped,
+          subtotal, tax, shipping, total,
+          voucher: appliedVoucher,
+          voucherDiscount,
+          storeCreditUsed,
+          ewalletUsed,
+          invoice: false,
+          paymentMethod: actualPaymentMethod,
+          paymentDetails: actualPaymentDetails || 'Secure PayPal checkout',
+          paymentMethods,
+          orderId: null,
+          process: { env: { PAYPAL_CLIENT_ID: process.env.PAYPAL_CLIENT_ID } }
+        });
+      });
     }
 
     // NETS QR PAYMENT HANDLING
@@ -586,7 +568,10 @@ app.post('/checkout/confirm', checkAuthenticated, (req, res) => {
         items: mapped,
         subtotal, tax, shipping, total,
         appliedVoucher,
-        voucherDiscount
+        voucherDiscount,
+        storeCreditUsed,
+        ewalletUsed,
+        paymentMethod: actualPaymentMethod
       };
 
       // Pass data to generateQrCode - add cartTotal to body
@@ -596,12 +581,12 @@ app.post('/checkout/confirm', checkAuthenticated, (req, res) => {
       return netsService.generateQrCode(req, res);
     }
 
-    // REGULAR PAYMENT METHODS (Credit/Debit, Apple Pay, PayNow)
-    const paymentDetails = (method => {
+    // REGULAR PAYMENT METHODS (Credit/Debit, Apple Pay, E-Wallet)
+    const paymentDetails = actualPaymentDetails || (method => {
       if (method === 'Contactless payment (Apple Pay)') return 'Pay with your linked Apple Pay device.';
-      if (method === 'PayNow') return 'PayNow UEN: 20241234A (Reference: your email)';
+      if (method === 'E-Wallet') return 'Pay using your e-wallet balance';
       return 'Visa / Mastercard / AMEX supported.';
-    })(paymentMethod);
+    })(actualPaymentMethod);
     const orderId = req.body.orderId || `INV-${Date.now()}`;
 
     const summary = {
@@ -609,7 +594,7 @@ app.post('/checkout/confirm', checkAuthenticated, (req, res) => {
       tax,
       shipping,
       total,
-      paymentMethod,
+      paymentMethod: actualPaymentMethod,
       paymentDetails: paymentDetails + (appliedVoucher && voucherDiscount > 0 ? ` | Voucher ${appliedVoucher.code} (-$${voucherDiscount.toFixed(2)})` : '') + (storeCreditUsed > 0 ? ` | Store Credit (-$${storeCreditUsed.toFixed(2)})` : '')
     };
 
@@ -619,9 +604,26 @@ app.post('/checkout/confirm', checkAuthenticated, (req, res) => {
 
       // Deduct store credit from user account if used
       if (!saveErr && storeCreditUsed > 0) {
-        const deductSql = 'UPDATE users SET store_credit = store_credit - ? WHERE userId = ? AND store_credit >= ?';
-        require('./db').query(deductSql, [storeCreditUsed, sessionUser.userId, storeCreditUsed], (creditErr) => {
+        const deductSql = 'UPDATE users SET store_credit = GREATEST(0, store_credit - ?) WHERE userId = ?';
+        require('./db').query(deductSql, [storeCreditUsed, sessionUser.userId], (creditErr) => {
           if (creditErr) console.error('Failed to deduct store credit', creditErr);
+        });
+      }
+
+      // Deduct e-wallet if used
+      if (!saveErr && ewalletUsed > 0) {
+        const EWallet = require('./models/EWallet');
+        EWallet.deductFunds(sessionUser.userId, ewalletUsed, `E-wallet payment for Order #${finalOrderId}`,(ewErr)=>{
+          if (ewErr) console.error('Failed to deduct e-wallet', ewErr);
+        });
+      }
+
+      // Award points for this purchase ($1 = 10 points based on subtotal)
+      if (!saveErr && subtotal > 0) {
+        const pointsEarned = Math.floor(subtotal * 10);
+        const EWallet = require('./models/EWallet');
+        EWallet.addPoints(sessionUser.userId, pointsEarned, `Points earned from Order #${finalOrderId}`, finalOrderId, (pointsErr) => {
+          if (pointsErr) console.error('Failed to add points:', pointsErr);
         });
       }
 
@@ -635,115 +637,163 @@ app.post('/checkout/confirm', checkAuthenticated, (req, res) => {
       CartItem.clear(sessionUser.userId, (clearErr) => {
         if (clearErr) console.error('Checkout confirm -> clear cart failed', clearErr);
 
-        res.render('invoice', {
-          user: req.session.user,
-          items: mapped,
-          subtotal, tax, shipping, total,
-          voucher: appliedVoucher,
-          voucherDiscount,
-          storeCreditUsed,
-          invoice: true,
-          paymentMethod,
-          paymentDetails,
-          paymentMethods,
-          orderId: finalOrderId,
-          generatedAt: new Date()
+        // Fetch updated user data to show remaining store credit and points
+        const User = require('./models/User');
+        User.getById(sessionUser.userId, (userErr, updatedUser) => {
+          const userToDisplay = updatedUser || req.session.user;
+          const remainingStoreCredit = updatedUser ? (updatedUser.store_credit || 0) : (req.session.user.store_credit || 0);
+          const pointsEarned = Math.floor(subtotal * 10);
+          
+          res.render('invoice', {
+            user: userToDisplay,
+            items: mapped,
+            subtotal, tax, shipping, total,
+            voucher: appliedVoucher,
+            voucherDiscount,
+            storeCreditUsed,
+            ewalletUsed,
+            remainingStoreCredit,
+            pointsEarned,
+            invoice: true,
+            paymentMethod: actualPaymentMethod,
+            paymentDetails,
+            paymentMethods,
+            orderId: finalOrderId,
+            generatedAt: new Date()
+          });
         });
       });
     });
   });
 });
 
-// ==================== PayPal Return Callback ====================
+// ==================== PayPal API Endpoints ====================
 
-// Handle PayPal return (after user approves payment)
-app.get('/paypal/return', checkAuthenticated, (req, res) => {
-  const sessionUser = req.session && req.session.user;
-  if (!sessionUser || !sessionUser.userId) return res.redirect('/login');
-
-  if (!paypalClient) {
-    req.flash && req.flash('error', 'PayPal is not configured.');
-    return res.redirect('/checkout');
-  }
-
-  const orderId = req.query.token;
-  const checkoutData = req.session.checkoutData;
-
-  if (!orderId || !checkoutData) {
-    req.flash && req.flash('error', 'Invalid PayPal session. Please try again.');
-    return res.redirect('/checkout');
-  }
-
-  // Capture the payment
+// PayPal: Create Order
+app.post('/api/paypal/create-order', checkAuthenticated, async (req, res) => {
   try {
-    const request = new checkoutNodejssdk.orders.OrdersCaptureRequest(orderId);
-    request.prefer('return=representation');
+    const { amount, storeCreditUsed, ewalletUsed } = req.body;
+    const amountNum = parseFloat(amount) || 0;
+    const storeCreditNum = parseFloat(storeCreditUsed) || 0;
+    const ewalletNum = parseFloat(ewalletUsed) || 0;
+    
+    console.log('Create PayPal Order - Received:', { amount: amountNum, storeCreditUsed: storeCreditNum, ewalletUsed: ewalletNum });
+    console.log('Session checkoutData:', req.session.checkoutData);
+    
+    // Validate amount matches session data or recalculate
+    if (req.session.checkoutData) {
+      const { subtotal, tax, shipping, voucherDiscount } = req.session.checkoutData;
+      const baseTotal = +(subtotal + tax + shipping - voucherDiscount).toFixed(2);
+      const expectedTotal = +(Math.max(0, baseTotal - storeCreditNum - ewalletNum)).toFixed(2);
+      
+      console.log('Expected total:', expectedTotal, 'Received amount:', amountNum);
+      
+      // Update session with the amounts to ensure consistency
+      req.session.checkoutData.storeCreditUsed = storeCreditNum;
+      req.session.checkoutData.ewalletUsed = ewalletNum;
+      req.session.checkoutData.total = amountNum;
+    }
+    
+    // Ensure amount is properly formatted to 2 decimal places
+    const formattedAmount = parseFloat(amountNum).toFixed(2);
+    console.log('Sending to PayPal:', formattedAmount);
+    
+    const order = await paypalService.createOrder(formattedAmount);
+    if (order && order.id) {
+      res.json({ id: order.id });
+    } else {
+      res.status(500).json({ error: 'Failed to create PayPal order', details: order });
+    }
+  } catch (err) {
+    console.error('PayPal create-order error:', err);
+    res.status(500).json({ error: 'Failed to create PayPal order', message: err.message });
+  }
+});
 
-    paypalClient.execute(request)
-      .then(response => {
-        if (response.result.status === 'COMPLETED') {
-          // Payment successful - record purchase
-          const summary = {
-            subtotal: checkoutData.subtotal,
-            tax: checkoutData.tax,
-            shipping: checkoutData.shipping,
-            total: checkoutData.total,
-            paymentMethod: 'PayPal',
-            paymentDetails: `PayPal Transaction ID: ${response.result.id}`
-          };
+// PayPal: Capture Order
+app.post('/api/paypal/capture-order', checkAuthenticated, async (req, res) => {
+  try {
+    const { orderID } = req.body;
+    const capture = await paypalService.captureOrder(orderID);
+    console.log('PayPal captureOrder response:', capture);
 
-          Purchase.record(sessionUser.userId, summary, checkoutData.items, (saveErr, purchaseId) => {
-            if (saveErr) console.error('Failed to record purchase:', saveErr);
+    if (capture.status === 'COMPLETED') {
+      const sessionUser = req.session.user;
+      const checkoutData = req.session.checkoutData;
 
-            // Mark voucher as used if applied
-            if (checkoutData.appliedVoucher && checkoutData.voucherDiscount > 0 && checkoutData.appliedVoucher.userVoucherId) {
-              Voucher.markUsed(checkoutData.appliedVoucher.userVoucherId, (vErr) => {
-                if (vErr) console.error('Failed to mark voucher used', vErr);
-              });
-            }
-
-            // Clear cart
-            CartItem.clear(sessionUser.userId, (clearErr) => {
-            if (clearErr) console.error('Failed to clear cart:', clearErr);
-          });
-
-          // Clean up session
-          delete req.session.paypalOrderId;
-          delete req.session.checkoutData;
-          delete req.session.appliedVoucher;
-
-          // Show invoice
-          res.render('invoice', {
-            user: sessionUser,
-            items: checkoutData.items,
-            subtotal: checkoutData.subtotal,
-            tax: checkoutData.tax,
-            shipping: checkoutData.shipping,
-            total: checkoutData.total,
-            voucher: checkoutData.appliedVoucher,
-            voucherDiscount: checkoutData.voucherDiscount,
-            invoice: true,
-            paymentMethod: 'PayPal',
-            paymentDetails: `PayPal Transaction ID: ${response.result.id}`,
-            paymentMethods: ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'PayNow', 'PayPal'],
-            orderId: purchaseId,
-            generatedAt: new Date()
-          });
-        });
-      } else {
-        req.flash && req.flash('error', 'PayPal payment was not completed.');
-        return res.redirect('/checkout');
+      if (!checkoutData) {
+        return res.status(400).json({ error: 'Checkout data not found in session' });
       }
-    })
-    .catch(error => {
-      console.error('PayPal capture error:', error.message || error);
-      req.flash && req.flash('error', 'PayPal payment failed. ' + (error.message || 'Please try again.'));
-      return res.redirect('/checkout');
-    });
-  } catch (error) {
-    console.error('PayPal return error:', error.message || error);
-    req.flash && req.flash('error', 'PayPal error: ' + (error.message || 'Unknown error'));
-    return res.redirect('/checkout');
+
+      // Payment successful - record purchase
+      const summary = {
+        subtotal: checkoutData.subtotal,
+        tax: checkoutData.tax,
+        shipping: checkoutData.shipping,
+        total: checkoutData.total,
+        paymentMethod: checkoutData.paymentMethod || 'PayPal',
+        paymentDetails: `PayPal Transaction ID: ${capture.id}`
+      };
+
+      Purchase.record(sessionUser.userId, summary, checkoutData.items, (saveErr, purchaseId) => {
+        if (saveErr) {
+          console.error('Failed to record purchase:', saveErr);
+          return res.status(500).json({ error: 'Failed to record purchase', message: saveErr.message });
+        }
+
+        // Deduct store credit if used
+        if (checkoutData.storeCreditUsed > 0) {
+          const deductSql = 'UPDATE users SET store_credit = GREATEST(0, store_credit - ?) WHERE userId = ?';
+          require('./db').query(deductSql, [checkoutData.storeCreditUsed, sessionUser.userId], (creditErr) => {
+            if (creditErr) console.error('Failed to deduct store credit', creditErr);
+          });
+        }
+
+        // Deduct e-wallet if used
+        if (checkoutData.ewalletUsed > 0) {
+          const EWallet = require('./models/EWallet');
+          EWallet.deductFunds(sessionUser.userId, checkoutData.ewalletUsed, `E-wallet payment for PayPal Order #${purchaseId}`,(ewErr)=>{
+            if (ewErr) console.error('Failed to deduct e-wallet', ewErr);
+          });
+        }
+
+        // Award points for this purchase ($1 = 10 points based on subtotal)
+        if (checkoutData.subtotal > 0) {
+          const pointsEarned = Math.floor(checkoutData.subtotal * 10);
+          const EWallet = require('./models/EWallet');
+          EWallet.addPoints(sessionUser.userId, pointsEarned, `Points earned from PayPal Order #${purchaseId}`, purchaseId, (pointsErr) => {
+            if (pointsErr) console.error('Failed to add points:', pointsErr);
+          });
+        }
+
+        // Mark voucher as used if applied
+        if (checkoutData.appliedVoucher && checkoutData.voucherDiscount > 0 && checkoutData.appliedVoucher.userVoucherId) {
+          Voucher.markUsed(checkoutData.appliedVoucher.userVoucherId, (vErr) => {
+            if (vErr) console.error('Failed to mark voucher used', vErr);
+          });
+        }
+
+        // Clear cart
+        CartItem.clear(sessionUser.userId, (clearErr) => {
+          if (clearErr) console.error('Failed to clear cart:', clearErr);
+        });
+
+        // Clean up session
+        delete req.session.checkoutData;
+        delete req.session.appliedVoucher;
+
+        // Return success with purchase ID
+        res.json({ 
+          success: true, 
+          purchaseId: purchaseId,
+          transactionId: capture.id
+        });
+      });
+    } else {
+      res.status(400).json({ error: 'Payment not completed', details: capture });
+    }
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to capture PayPal order', message: err.message });
   }
 });
 
@@ -915,17 +965,42 @@ app.get('/nets-qr/success', checkAuthenticated, (req, res) => {
     tax: checkoutData.tax,
     shipping: checkoutData.shipping,
     total: checkoutData.total,
-    paymentMethod: 'NETS QR',
+    paymentMethod: checkoutData.paymentMethod || 'NETS QR',
     paymentDetails: `NETS QR Transaction Ref: ${req.query.txn_retrieval_ref || 'N/A'}`
   };
 
   Purchase.record(sessionUser.userId, summary, checkoutData.items, (saveErr, purchaseId) => {
     if (saveErr) console.error('Failed to record NETS QR purchase:', saveErr);
 
+    // Deduct store credit if used
+    if (checkoutData.storeCreditUsed > 0) {
+      const deductSql = 'UPDATE users SET store_credit = GREATEST(0, store_credit - ?) WHERE userId = ?';
+      require('./db').query(deductSql, [checkoutData.storeCreditUsed, sessionUser.userId], (creditErr) => {
+        if (creditErr) console.error('Failed to deduct store credit', creditErr);
+      });
+    }
+
+    // Award points for this purchase ($1 = 10 points based on subtotal)
+    if (checkoutData.subtotal > 0) {
+      const pointsEarned = Math.floor(checkoutData.subtotal * 10);
+      const EWallet = require('./models/EWallet');
+      EWallet.addPoints(sessionUser.userId, pointsEarned, `Points earned from NETS QR Order #${purchaseId}`, purchaseId, (pointsErr) => {
+        if (pointsErr) console.error('Failed to add points:', pointsErr);
+      });
+    }
+
     // Mark voucher as used if applied
     if (checkoutData.appliedVoucher && checkoutData.voucherDiscount > 0 && checkoutData.appliedVoucher.userVoucherId) {
       Voucher.markUsed(checkoutData.appliedVoucher.userVoucherId, (vErr) => {
         if (vErr) console.error('Failed to mark voucher used', vErr);
+      });
+    }
+
+    // Deduct e-wallet if used
+    if (checkoutData.ewalletUsed > 0) {
+      const EWallet = require('./models/EWallet');
+      EWallet.deductFunds(sessionUser.userId, checkoutData.ewalletUsed, `E-wallet payment for NETS QR Order #${purchaseId}`,(ewErr)=>{
+        if (ewErr) console.error('Failed to deduct e-wallet', ewErr);
       });
     }
 
@@ -938,22 +1013,32 @@ app.get('/nets-qr/success', checkAuthenticated, (req, res) => {
     delete req.session.checkoutData;
     delete req.session.appliedVoucher;
 
-    // Show invoice with success message
-    res.render('invoice', {
-      user: sessionUser,
-      items: checkoutData.items,
-      subtotal: checkoutData.subtotal,
-      tax: checkoutData.tax,
-      shipping: checkoutData.shipping,
-      total: checkoutData.total,
-      voucher: checkoutData.appliedVoucher,
-      voucherDiscount: checkoutData.voucherDiscount,
-      invoice: true,
-      paymentMethod: 'NETS QR',
-      paymentDetails: `NETS QR Transaction Ref: ${req.query.txn_retrieval_ref || 'N/A'}`,
-      paymentMethods: ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'PayNow', 'PayPal', 'NETS QR'],
-      orderId: purchaseId,
-      generatedAt: new Date()
+    // Fetch updated user data to show remaining store credit
+    const User = require('./models/User');
+    User.getById(sessionUser.userId, (userErr, updatedUser) => {
+      const userToDisplay = updatedUser || sessionUser;
+      const remainingStoreCredit = updatedUser ? (updatedUser.store_credit || 0) : (sessionUser.store_credit || 0);
+
+      // Show invoice with success message
+      res.render('invoice', {
+        user: userToDisplay,
+        items: checkoutData.items,
+        subtotal: checkoutData.subtotal,
+        tax: checkoutData.tax,
+        shipping: checkoutData.shipping,
+        total: checkoutData.total,
+        voucher: checkoutData.appliedVoucher,
+        voucherDiscount: checkoutData.voucherDiscount,
+        storeCreditUsed: checkoutData.storeCreditUsed || 0,
+        ewalletUsed: checkoutData.ewalletUsed || 0,
+        remainingStoreCredit,
+        invoice: true,
+        paymentMethod: checkoutData.paymentMethod || 'NETS QR',
+        paymentDetails: `NETS QR Transaction Ref: ${req.query.txn_retrieval_ref || 'N/A'}`,
+        paymentMethods: ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'E-Wallet', 'PayPal', 'NETS QR'],
+        orderId: purchaseId,
+        generatedAt: new Date()
+      });
     });
   });
 });
@@ -974,6 +1059,42 @@ app.get('/nets-qr/fail', checkAuthenticated, (req, res) => {
 });
 
 // ==================== End NETS QR Routes ====================
+
+// ==================== E-WALLET ROUTES ====================
+const EWalletController = require('./controllers/EWalletController');
+const EWallet = require('./models/EWallet');
+
+// View e-wallet dashboard
+app.get('/ewallet', checkAuthenticated, (req, res) => {
+  EWalletController.viewWallet(req, res);
+});
+
+// Show top-up form
+app.get('/ewallet/topup', checkAuthenticated, (req, res) => {
+  EWalletController.showTopup(req, res);
+});
+
+// Process top-up
+app.post('/ewallet/topup/process', checkAuthenticated, (req, res) => {
+  EWalletController.processTopup(req, res);
+});
+
+// Confirm top-up after payment
+app.post('/ewallet/topup/confirm', checkAuthenticated, (req, res) => {
+  EWalletController.confirmTopup(req, res);
+});
+
+// Convert points to store credit
+app.post('/ewallet/convert-points', checkAuthenticated, (req, res) => {
+  EWalletController.convertPoints(req, res);
+});
+
+// Toggle auto-convert points preference
+app.post('/ewallet/auto-convert', checkAuthenticated, (req, res) => {
+  EWalletController.toggleAutoConvert(req, res);
+});
+
+// ==================== End E-Wallet Routes ====================
 
 // --------------------- Start the server ---------------------
 const PORT = process.env.PORT || 3000;

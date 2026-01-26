@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <title>E-Wallet</title>
+  <style>
+    body { background: #f7f8fa; }
+    .card-border { border-radius: 10px; }
+    .wallet-card {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border-radius: 15px;
+      padding: 30px;
+      margin-bottom: 20px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+    }
+    .balance-label { font-size: 0.9rem; opacity: 0.9; }
+    .balance-amount { font-size: 2.5rem; font-weight: bold; margin: 10px 0; }
+    .points-badge {
+      background: rgba(255,255,255,0.2);
+      padding: 10px 15px;
+      border-radius: 8px;
+      display: inline-block;
+      margin-top: 10px;
+    }
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-bottom: 30px;
+    }
+    .stat-card {
+      background: white;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.05);
+      text-align: center;
+    }
+    .stat-value { font-size: 1.8rem; font-weight: bold; color: #667eea; }
+    .stat-label { font-size: 0.85rem; color: #6c757d; text-transform: uppercase; margin-top: 5px; }
+    .transaction-item {
+      padding: 12px 0;
+      border-bottom: 1px solid #e5e7eb;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .transaction-item:last-child { border-bottom: none; }
+    .transaction-type {
+      display: inline-block;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: bold;
+    }
+    .type-top_up { background: #d4edda; color: #155724; }
+    .type-deduction { background: #f8d7da; color: #721c24; }
+    .type-earned { background: #cfe2ff; color: #084298; }
+    .type-spent { background: #fff3cd; color: #664d03; }
+    .type-redeemed { background: #d1ecf1; color: #0c5460; }
+  </style>
+</head>
+<body>
+  <%- include('partials/navbar') %>
+
+  <div class="container my-4">
+    <% if (messages && messages.error && messages.error.length) { %>
+      <div class="alert alert-danger">
+        <% messages.error.forEach(msg => { %><div><%= msg %></div><% }); %>
+      </div>
+    <% } %>
+    <% if (messages && messages.success && messages.success.length) { %>
+      <div class="alert alert-success">
+        <% messages.success.forEach(msg => { %><div><%= msg %></div><% }); %>
+      </div>
+    <% } %>
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <h2>E-Wallet & Points</h2>
+      <a href="/ewallet/topup" class="btn btn-primary">+ Top Up Wallet</a>
+    </div>
+
+    <!-- E-Wallet Balance Card + Overview -->
+    <div class="wallet-card">
+      <div class="row align-items-center">
+        <div class="col-md-6">
+          <div class="balance-label">E-Wallet Balance</div>
+          <div class="balance-amount">$<%= Number(ewallet_balance).toFixed(2) %></div>
+          <div class="balance-label">Store Credit: $<%= Number(store_credit).toFixed(2) %></div>
+        </div>
+        <div class="col-md-6">
+          <div class="points-badge">
+            <div class="balance-label">Points Balance</div>
+            <div style="font-size: 2rem; font-weight: bold;"><%= points_balance %></div>
+            <small>(100 points = $1)</small>
+          </div>
+        </div>
+      </div>
+      <div class="row mt-3">
+        <div class="col-md-4"><small class="opacity-75">Wallet Status</small><div class="fw-semibold">Active</div></div>
+        <div class="col-md-4"><small class="opacity-75">Last Top-up Method</small><div class="fw-semibold"><%= typeof lastTopupMethod !== 'undefined' ? lastTopupMethod : '—' %></div></div>
+        <div class="col-md-4"><small class="opacity-75">Last Top-up Date</small><div class="fw-semibold"><%= (typeof lastTopupDate !== 'undefined' && lastTopupDate) ? new Date(lastTopupDate).toLocaleString() : '—' %></div></div>
+      </div>
+    </div>
+
+    <!-- Statistics Grid -->
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-value">$<%= Number(ewallet_balance).toFixed(2) %></div>
+        <div class="stat-label">Wallet Balance</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value"><%= points_balance %></div>
+        <div class="stat-label">Points Available</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">$<%= (points_balance / 100).toFixed(2) %></div>
+        <div class="stat-label">Points Value</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">$<%= Number(store_credit).toFixed(2) %></div>
+        <div class="stat-label">Store Credit</div>
+      </div>
+    </div>
+
+    <div class="row">
+      <!-- E-Wallet Transactions -->
+      <div class="col-md-6 mb-4">
+        <div class="card card-border shadow-sm">
+          <div class="card-header bg-light">
+            <h5 class="mb-0">E-Wallet Transactions</h5>
+          </div>
+          <div class="card-body">
+            <% if (!transactions || transactions.length === 0) { %>
+              <div class="text-muted text-center py-4">No transactions yet</div>
+            <% } else { %>
+              <% transactions.forEach(function(txn) { %>
+                <div class="transaction-item">
+                  <div>
+                    <span class="transaction-type type-<%= txn.transactionType %>">
+                      <%= txn.transactionType.toUpperCase() %>
+                    </span>
+                    <div class="mt-2">
+                      <small class="text-muted"><%= new Date(txn.createdAt).toLocaleString() %></small>
+                      <div><small><%= txn.description || txn.paymentMethod %></small></div>
+                    </div>
+                  </div>
+                  <div class="text-end fw-bold" style="color: <%= txn.transactionType === 'deduction' ? '#dc3545' : '#28a745' %>">
+                    <%= txn.transactionType === 'deduction' ? '-' : '+' %>$<%= Number(txn.amount).toFixed(2) %>
+                  </div>
+                </div>
+              <% }); %>
+            <% } %>
+          </div>
+        </div>
+      </div>
+
+      <!-- Points & Conversion -->
+      <div class="col-md-6 mb-4">
+        <div class="card card-border shadow-sm">
+          <div class="card-header bg-light">
+            <h5 class="mb-0">Points Activity & Conversion</h5>
+          </div>
+          <div class="card-body">
+            <!-- Points Conversion Form -->
+            <% 
+              const progressToDollar = points_balance % 100; 
+              const pointsToNext = (100 - progressToDollar) % 100; 
+            %>
+            <div class="mb-3">
+              <div class="d-flex justify-content-between small">
+                <span>Progress to next $1 credit</span>
+                <span><%= progressToDollar %> / 100 pts</span>
+              </div>
+              <div class="progress" style="height: 8px;">
+                <div class="progress-bar bg-success" role="progressbar" style="width: <%= (progressToDollar) %>%"></div>
+              </div>
+              <small class="text-muted"><%= pointsToNext === 0 ? 'You have enough to convert.' : (pointsToNext + ' pts to next $1') %></small>
+            </div>
+
+            <% if (points_balance >= 100) { %>
+              <div class="mb-3 p-3 bg-info bg-opacity-10 rounded">
+                <h6 class="mb-2">Convert Points to Store Credit</h6>
+                <p class="text-muted small">100 points = $1.00 store credit</p>
+                <form action="/ewallet/convert-points" method="POST" class="d-flex gap-2">
+                  <input type="number" name="pointsAmount" class="form-control form-control-sm" placeholder="Enter points (multiples of 100)" min="100" step="100" max="<%= points_balance %>" required>
+                  <button type="submit" class="btn btn-sm btn-info">Convert</button>
+                </form>
+              </div>
+            <% } %>
+
+            <div class="mb-4 p-3 bg-light rounded d-flex align-items-center justify-content-between">
+              <div>
+                <div class="fw-semibold">Auto-convert points</div>
+                <small class="text-muted">Automatically convert when you reach 100 pts</small>
+              </div>
+              <form action="/ewallet/auto-convert" method="POST" class="d-flex align-items-center gap-2">
+                <input type="hidden" name="enabled" value="<%= (typeof auto_convert_points !== 'undefined' && auto_convert_points ? '0' : '1') %>">
+                <div class="form-check form-switch m-0">
+                  <input class="form-check-input" type="checkbox" role="switch" <%= (typeof auto_convert_points !== 'undefined' && auto_convert_points ? 'checked' : '') %> onclick="this.closest('form').submit();">
+                </div>
+              </form>
+            </div>
+
+            <!-- Points Transactions -->
+            <h6 class="mb-3">Recent Points Activity</h6>
+            <% if (!pointsTransactions || pointsTransactions.length === 0) { %>
+              <div class="text-muted text-center py-4">No points activity yet</div>
+            <% } else { %>
+              <% pointsTransactions.slice(0, 10).forEach(function(txn) { %>
+                <div class="transaction-item">
+                  <div>
+                    <span class="transaction-type type-<%= txn.transactionType %>">
+                      <%= txn.transactionType.toUpperCase() %>
+                    </span>
+                    <div class="mt-2">
+                      <small class="text-muted"><%= new Date(txn.createdAt).toLocaleString() %></small>
+                      <div><small><%= txn.description %></small></div>
+                    </div>
+                  </div>
+                  <div class="text-end fw-bold" style="color: <%= txn.transactionType === 'spent' || txn.transactionType === 'redeemed' ? '#dc3545' : '#28a745' %>">
+                    <%= txn.transactionType === 'spent' || txn.transactionType === 'redeemed' ? '-' : '+' %><%= txn.pointsAmount %>pts
+                  </div>
+                </div>
+              <% }); %>
+            <% } %>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- How It Works: Separated Wallet vs Points -->
+    <div class="row mb-4">
+      <div class="col-md-6">
+        <div class="card card-border shadow-sm h-100">
+          <div class="card-header bg-light"><h5 class="mb-0">Wallet</h5></div>
+          <div class="card-body">
+            <ul class="small mb-0">
+              <li>Top up using PayPal, E-Wallet, Apple Pay, or card</li>
+              <li>Pay faster at checkout with wallet balance</li>
+              <li>Track top-ups and deductions in Transactions</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+      <div class="col-md-6">
+        <div class="card card-border shadow-sm h-100">
+          <div class="card-header bg-light"><h5 class="mb-0">Points</h5></div>
+          <div class="card-body">
+            <ul class="small mb-0">
+              <li>Earn 10 points for every $1 spent</li>
+              <li>Convert 100 points to $1 store credit</li>
+              <li>Redeem store credit during checkout</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mb-4">
+      <a href="/shopping" class="btn btn-outline-primary">Continue Shopping</a>
+      <a href="/profile" class="btn btn-outline-secondary">Back to Profile</a>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

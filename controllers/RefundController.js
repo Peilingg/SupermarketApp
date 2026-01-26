@@ -153,6 +153,17 @@ const RefundController = {
       }
 
       const refundAmount = Number(result.refundAmount || 0);
+      const userId = result.userId;
+
+      // Store refund notification in session for the affected user
+      // This will be shown to the user when they visit the shopping page
+      if (!req.session.userNotifications) req.session.userNotifications = {};
+      if (!req.session.userNotifications[userId]) req.session.userNotifications[userId] = [];
+      req.session.userNotifications[userId].push({
+        type: 'refund-success',
+        message: `Refund successful! $${refundAmount.toFixed(2)} store credit has been added to your wallet.`
+      });
+
       req.flash && req.flash('success', `Refund of $${refundAmount.toFixed(2)} has been approved and added as store credit.`);
       return res.redirect('/managerefunds');
     });
@@ -171,15 +182,33 @@ const RefundController = {
       return res.redirect('/managerefunds');
     }
 
-    RefundRequest.reject(refundId, adminNotes, function(err, result) {
-      if (err) {
-        console.error('RefundController.reject error:', err);
-        req.flash && req.flash('error', 'Failed to reject refund.');
+    // First get refund details to get userId
+    RefundRequest.getById(refundId, function(getErr, refund) {
+      if (getErr || !refund) {
+        req.flash && req.flash('error', 'Refund request not found.');
         return res.redirect('/managerefunds');
       }
 
-      req.flash && req.flash('success', 'Refund request has been rejected.');
-      return res.redirect('/managerefunds');
+      RefundRequest.reject(refundId, adminNotes, function(err, result) {
+        if (err) {
+          console.error('RefundController.reject error:', err);
+          req.flash && req.flash('error', 'Failed to reject refund.');
+          return res.redirect('/managerefunds');
+        }
+
+        const userId = refund.userId;
+
+        // Store refund notification in session for the affected user
+        if (!req.session.userNotifications) req.session.userNotifications = {};
+        if (!req.session.userNotifications[userId]) req.session.userNotifications[userId] = [];
+        req.session.userNotifications[userId].push({
+          type: 'refund-rejected',
+          message: 'Refund request unsuccessful. Your refund request has been reviewed and declined.'
+        });
+
+        req.flash && req.flash('success', 'Refund request has been rejected.');
+        return res.redirect('/managerefunds');
+      });
     });
   }
 };

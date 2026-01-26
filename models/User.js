@@ -3,13 +3,13 @@ const db = require('../db');
 const User = {
     // get all users (omit passwords in list)
     getAll: function(callback) {
-        const sql = 'SELECT userId, username, email, address, contact, role, status, COALESCE(store_credit, 0) as store_credit FROM users';
+        const sql = 'SELECT userId, username, email, address, contact, role, status, COALESCE(store_credit, 0) as store_credit, COALESCE(ewallet_balance, 0) as ewallet_balance, COALESCE(points_balance, 0) as points_balance, COALESCE(auto_convert_points, 0) as auto_convert_points FROM users';
         db.query(sql, function(err, results) { return callback(err, results); });
     },
 
     // get a user by id (omit password)
     getById: function(id, callback) {
-        const sql = 'SELECT userId, username, email, address, contact, role, status, COALESCE(store_credit, 0) as store_credit FROM users WHERE userId = ?';
+        const sql = 'SELECT userId, username, email, address, contact, role, status, COALESCE(store_credit, 0) as store_credit, COALESCE(ewallet_balance, 0) as ewallet_balance, COALESCE(points_balance, 0) as points_balance, COALESCE(auto_convert_points, 0) as auto_convert_points FROM users WHERE userId = ?';
         db.query(sql, [id], function(err, results) { if (err) return callback(err); return callback(null, results[0] || null); });
     },
 

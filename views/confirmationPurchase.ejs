@@ -5,6 +5,9 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <title><%= invoice ? 'Invoice' : 'Confirm Purchase' %></title>
+  <% if (!invoice) { %>
+  <script src="https://www.paypal.com/sdk/js?client-id=<%= process.env.PAYPAL_CLIENT_ID %>&currency=SGD&locale=en_SG"></script>
+  <% } %>
   <style>
     .card-border { border-radius: 10px; }
     .badge-soft { background: #eef2f7; color: #0d6efd; }
@@ -120,7 +123,7 @@
         <div class="mb-3 summary-box">
           <h6>Payment</h6>
           <% 
-            const methods = paymentMethods || ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'PayNow', 'PayPal', 'NETS QR'];
+            const methods = paymentMethods || ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'E-Wallet', 'PayPal', 'NETS QR'];
             const selectedMethod = paymentMethod || methods[0];
           %>
           <% if (!invoice) { %>
@@ -130,7 +133,7 @@
                   <input class="form-check-input me-2 payment-choice" type="radio" name="paymentMethod" value="<%= m %>" form="confirm-form" <%= m === selectedMethod ? 'checked' : '' %>>
                   <div>
                     <div class="fw-semibold"><%= m %></div>
-                    <% if (m === 'PayNow') { %><small class="text-muted">PayNow UEN: 20241234A</small><% } %>
+                    <% if (m === 'E-Wallet') { %><small class="text-muted">Pay using your e-wallet balance</small><% } %>
                     <% if (m === 'PayPal') { %><small class="text-muted">Secure PayPal checkout</small><% } %>
                     <% if (m === 'NETS QR') { %><small class="text-muted">Scan QR code with your bank app</small><% } %>
                   </div>
@@ -164,18 +167,38 @@
             <% if (!invoice) { %>
               <% 
                 const userStoreCredit = Number(user && user.store_credit ? user.store_credit : 0);
+                const userEwallet = Number(user && user.ewallet_balance ? user.ewallet_balance : 0);
               %>
-              <% if (userStoreCredit > 0) { %>
+              <% if (userEwallet > 0) { %>
                 <tr>
                   <th class="text-end">
                     <div class="form-check form-switch d-inline-flex align-items-center">
-                      <input class="form-check-input me-2" type="checkbox" id="useStoreCreditToggle" style="cursor: pointer;">
-                      <label class="form-check-label" for="useStoreCreditToggle" style="cursor: pointer;">Use Store Credit</label>
+                      <input class="form-check-input me-2" type="checkbox" id="useEwalletToggle" style="cursor: pointer;">
+                      <label class="form-check-label" for="useEwalletToggle" style="cursor: pointer;">Use E-Wallet</label>
                     </div>
-                    <div><small class="text-muted">Available: $<%= userStoreCredit.toFixed(2) %></small></div>
+                    <div><small class="text-muted">Available: $<%= userEwallet.toFixed(2) %></small></div>
                   </th>
-                  <th class="text-end text-success" id="store-credit-discount" style="display: none;">- $<span id="store-credit-amount">0.00</span></th>
+                  <th class="text-end text-success" id="ewallet-discount" style="display: none;">- $<span id="ewallet-amount">0.00</span></th>
                 </tr>
+              <% } %>
+              <% if (userStoreCredit > 0) { %>
+                <% 
+                  // Only show store credit option if there will be remaining balance after using it
+                  const baseTotal = subtotalVal + taxVal + shippingVal - voucherDiscountVal;
+                  const remainingAfterStoreCredit = Math.max(0, baseTotal - userStoreCredit);
+                %>
+                <% if (remainingAfterStoreCredit > 0) { %>
+                  <tr>
+                    <th class="text-end">
+                      <div class="form-check form-switch d-inline-flex align-items-center">
+                        <input class="form-check-input me-2" type="checkbox" id="useStoreCreditToggle" style="cursor: pointer;">
+                        <label class="form-check-label" for="useStoreCreditToggle" style="cursor: pointer;">Use Store Credit</label>
+                      </div>
+                      <div><small class="text-muted">Available: $<%= userStoreCredit.toFixed(2) %></small></div>
+                    </th>
+                    <th class="text-end text-success" id="store-credit-discount" style="display: none;">- $<span id="store-credit-amount">0.00</span></th>
+                  </tr>
+                <% } %>
               <% } %>
             <% } %>
             <% if (voucher) { %>
@@ -198,6 +221,7 @@
             <% } %>
             <a href="/vouchers" class="btn btn-outline-primary w-100 mb-2">Manage vouchers</a>
           </div>
+          <div id="paypal-button-container" style="display: none; margin-bottom: 10px;"></div>
           <form id="confirm-form" action="/checkout/confirm" method="POST">
             <% /* include a simple CSRF/token field here if you use one */ %>
             <% if (orderId) { %>
@@ -205,7 +229,9 @@
             <% } %>
             <input type="hidden" name="useStoreCredit" id="useStoreCreditInput" value="false">
             <input type="hidden" name="storeCreditUsed" id="storeCreditUsedInput" value="0">
-            <button type="submit" class="btn btn-success w-100">Confirm & Pay</button>
+            <input type="hidden" name="useEwallet" id="useEwalletInput" value="false">
+            <input type="hidden" name="ewalletUsed" id="ewalletUsedInput" value="0">
+            <button type="submit" id="confirm-pay-btn" class="btn btn-success w-100">Confirm & Pay</button>
           </form>
           <a href="/cart" class="btn btn-outline-secondary w-100 mt-2">Edit Cart</a>
         <% } else { %>
@@ -224,6 +250,11 @@
       const paymentBtn = document.getElementById('paymentBtn');
 
       // Store credit toggle handling
+      const ewalletToggle = document.getElementById('useEwalletToggle');
+      const ewalletDiscountRow = document.getElementById('ewallet-discount');
+      const ewalletAmountSpan = document.getElementById('ewallet-amount');
+      const useEwalletInput = document.getElementById('useEwalletInput');
+      const ewalletUsedInput = document.getElementById('ewalletUsedInput');
       const storeCreditToggle = document.getElementById('useStoreCreditToggle');
       const storeCreditDiscountRow = document.getElementById('store-credit-discount');
       const storeCreditAmountSpan = document.getElementById('store-credit-amount');
@@ -231,48 +262,148 @@
       const useStoreCreditInput = document.getElementById('useStoreCreditInput');
       const storeCreditUsedInput = document.getElementById('storeCreditUsedInput');
 
-      if (storeCreditToggle) {
-        // Data values from EJS
-        const subtotal = <%= (typeof subtotal !== 'undefined' ? subtotal : 0) %>;
-        const tax = <%= (typeof tax !== 'undefined' ? tax : 0) %>;
-        const shipping = <%= (typeof shipping !== 'undefined' ? shipping : 0) %>;
-        const voucherDiscount = <%= (typeof voucherDiscount !== 'undefined' ? voucherDiscount : 0) %>;
-        const availableCredit = <%= (user && user.store_credit ? user.store_credit : 0) %>;
-        const baseTotal = subtotal + tax + shipping - voucherDiscount;
+      // Data values from EJS
+      const subtotalVal = <%= (typeof subtotal !== 'undefined' ? subtotal : 0) %>;
+      const taxVal = <%= (typeof tax !== 'undefined' ? tax : 0) %>;
+      const shippingVal = <%= (typeof shipping !== 'undefined' ? shipping : 0) %>;
+      const voucherDiscountVal = <%= (typeof voucherDiscount !== 'undefined' ? voucherDiscount : 0) %>;
+      const availableStoreCredit = <%= (user && user.store_credit ? user.store_credit : 0) %>;
+      const availableEwallet = <%= (user && user.ewallet_balance ? user.ewallet_balance : 0) %>;
 
-        storeCreditToggle.addEventListener('change', function() {
-          if (this.checked) {
-            const creditToUse = Math.min(availableCredit, baseTotal);
-            const newTotal = Math.max(0, baseTotal - creditToUse);
-            storeCreditAmountSpan.textContent = creditToUse.toFixed(2);
-            storeCreditDiscountRow.style.display = '';
-            totalAmountEl.textContent = '$' + newTotal.toFixed(2);
-            useStoreCreditInput.value = 'true';
-            storeCreditUsedInput.value = creditToUse.toFixed(2);
-          } else {
-            storeCreditDiscountRow.style.display = 'none';
-            totalAmountEl.textContent = '$' + baseTotal.toFixed(2);
-            useStoreCreditInput.value = 'false';
-            storeCreditUsedInput.value = '0';
-          }
-        });
+      function recomputeTotals() {
+        const baseTotal = subtotalVal + taxVal + shippingVal - voucherDiscountVal;
+        let creditToUse = 0;
+        let ewalletToUse = 0;
+
+        if (storeCreditToggle && storeCreditToggle.checked) {
+          creditToUse = Math.min(availableStoreCredit, baseTotal);
+        }
+        let remaining = Math.max(0, baseTotal - creditToUse);
+        if (ewalletToggle && ewalletToggle.checked) {
+          ewalletToUse = Math.min(availableEwallet, remaining);
+        }
+        const newTotal = Math.max(0, remaining - ewalletToUse);
+
+        if (storeCreditToggle) {
+          storeCreditAmountSpan.textContent = creditToUse.toFixed(2);
+          storeCreditDiscountRow.style.display = creditToUse > 0 ? '' : 'none';
+          useStoreCreditInput.value = creditToUse > 0 ? 'true' : 'false';
+          storeCreditUsedInput.value = creditToUse.toFixed(2);
+        }
+        if (ewalletToggle) {
+          ewalletAmountSpan.textContent = ewalletToUse.toFixed(2);
+          ewalletDiscountRow.style.display = ewalletToUse > 0 ? '' : 'none';
+          useEwalletInput.value = ewalletToUse > 0 ? 'true' : 'false';
+          ewalletUsedInput.value = ewalletToUse.toFixed(2);
+        }
+
+        totalAmountEl.textContent = '$' + newTotal.toFixed(2);
+      }
+
+      if (storeCreditToggle) storeCreditToggle.addEventListener('change', recomputeTotals);
+      if (ewalletToggle) ewalletToggle.addEventListener('change', recomputeTotals);
+      // Initial compute
+      recomputeTotals();
+
+      // Handle payment method selection
+      function updatePaymentUI() {
+        const selectedMethod = document.querySelector('input[name="paymentMethod"]:checked');
+        const paypalContainer = document.getElementById('paypal-button-container');
+        const confirmBtn = document.getElementById('confirm-pay-btn');
+        
+        if (selectedMethod && selectedMethod.value === 'PayPal') {
+          // Show PayPal buttons, hide regular confirm button
+          if (paypalContainer) paypalContainer.style.display = 'block';
+          if (confirmBtn) confirmBtn.style.display = 'none';
+          if (summaryEl) summaryEl.textContent = selectedMethod.value;
+        } else {
+          // Show regular confirm button, hide PayPal buttons
+          if (paypalContainer) paypalContainer.style.display = 'none';
+          if (confirmBtn) confirmBtn.style.display = 'block';
+          if (selectedMethod && summaryEl) summaryEl.textContent = selectedMethod.value;
+        }
       }
 
       radios.forEach(r => {
-        r.addEventListener('change', function() {
-          if (this.checked && summaryEl) summaryEl.textContent = this.value;
-        });
+        r.addEventListener('change', updatePaymentUI);
       });
 
-      if (confirmForm && paymentBtn) {
-        confirmForm.addEventListener('submit', function(e) {
-          const selectedMethod = document.querySelector('input[name="paymentMethod"]:checked');
-          if (selectedMethod && selectedMethod.value === 'PayPal') {
-            e.preventDefault();
-            window.location.href = '/checkout/confirm';
+      // Initialize PayPal buttons
+      if (typeof paypal !== 'undefined') {
+        const totalAmountEl = document.getElementById('total-amount');
+        
+        paypal.Buttons({
+          fundingSource: paypal.FUNDING.PAYPAL,
+          createOrder: function(data, actions) {
+            // Get the current total amount and store/store+ewallet usage
+            const totalText = totalAmountEl ? totalAmountEl.textContent.replace('$', '').trim() : '<%= total %>';
+            const amount = parseFloat(totalText);
+            const storeCreditUsed = parseFloat(document.getElementById('storeCreditUsedInput')?.value || 0);
+            const ewalletUsed = parseFloat(document.getElementById('ewalletUsedInput')?.value || 0);
+            
+            console.log('PayPal createOrder - Amount:', amount, 'StoreCreditUsed:', storeCreditUsed);
+            
+            // Call our server to create the order and update session
+            return fetch('/api/paypal/create-order', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ 
+                amount: Number(amount).toFixed(2),
+                storeCreditUsed: Number(storeCreditUsed).toFixed(2),
+                ewalletUsed: Number(ewalletUsed).toFixed(2)
+              })
+            })
+            .then(response => response.json())
+            .then(order => {
+              if (order.error) {
+                alert('Error creating PayPal order: ' + (order.error.message || order.error));
+                throw new Error(order.error);
+              }
+              return order.id;
+            });
+          },
+          onApprove: function(data, actions) {
+            // Show loading state
+            const paypalContainer = document.getElementById('paypal-button-container');
+            if (paypalContainer) {
+              paypalContainer.innerHTML = '<div class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Processing...</span></div><p>Processing your payment...</p></div>';
+            }
+            
+            // Capture the order
+            return fetch('/api/paypal/capture-order', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({ orderID: data.orderID })
+            })
+            .then(response => response.json())
+            .then(details => {
+              if (details.success) {
+                // Payment successful - redirect to invoice
+                alert('Payment successful! Order ID: ' + details.purchaseId);
+                window.location.href = '/purchases';
+              } else {
+                alert('Payment failed: ' + (details.error || 'Unknown error'));
+                window.location.reload();
+              }
+            })
+            .catch(err => {
+              alert('Error processing payment: ' + err.message);
+              window.location.reload();
+            });
+          },
+          onError: function(err) {
+            console.error('PayPal error:', err);
+            alert('PayPal payment error. Please try again or choose a different payment method.');
           }
-        });
+        }).render('#paypal-button-container');
       }
+
+      // Initialize UI based on current selection
+      updatePaymentUI();
     });
   </script>
   <% } %>

@@ -63,6 +63,17 @@
               <span class="text-muted"><%= paymentDetails %></span>
             </div>
           <% } %>
+          <% 
+            // Show store credit in order summary only if it's a FULL payment (payment method is Store Credit)
+            const pmMethod = typeof paymentMethod !== 'undefined' ? paymentMethod : '';
+            const showStoreCreditSummary = pmMethod && pmMethod.includes('Store Credit');
+          %>
+          <% if (showStoreCreditSummary && typeof storeCreditUsed !== 'undefined' && storeCreditUsed > 0) { %>
+            <div class="d-flex justify-content-between">
+              <span class="label">Paid with</span>
+              <span class="text-success">Store Credit ($<%= Number(storeCreditUsed).toFixed(2) %>)</span>
+            </div>
+          <% } %>
         </div>
       </div>
     </div>
@@ -130,10 +141,32 @@
                 <th class="text-end text-success">- $<%= Number(voucherDiscount).toFixed(2) %></th>
               </tr>
             <% } %>
-            <% if (typeof storeCreditUsed !== 'undefined' && storeCreditUsed > 0) { %>
+            <% 
+              // Only show store credit deduction if it's a PARTIAL payment (not full coverage)
+              const baseTotal = typeof subtotal !== 'undefined' ? subtotal : 0;
+              const taxAmount = typeof tax !== 'undefined' ? tax : 0;
+              const shippingAmount = typeof shipping !== 'undefined' ? shipping : 0;
+              const voucherAmt = typeof voucherDiscount !== 'undefined' ? voucherDiscount : 0;
+              const calculatedTotal = baseTotal + taxAmount + shippingAmount - voucherAmt;
+              const creditUsedAmount = typeof storeCreditUsed !== 'undefined' ? storeCreditUsed : 0;
+              const isPartialPayment = creditUsedAmount > 0 && calculatedTotal > 0;
+            %>
+            <% if (isPartialPayment) { %>
               <tr>
                 <th class="text-end">Store Credit Used</th>
-                <th class="text-end text-success">- $<%= Number(storeCreditUsed).toFixed(2) %></th>
+                <th class="text-end text-success">- $<%= Number(creditUsedAmount).toFixed(2) %></th>
+              </tr>
+              <% if (typeof remainingStoreCredit !== 'undefined') { %>
+                <tr>
+                  <th class="text-end">Remaining Store Credit</th>
+                  <th class="text-end text-info">$<%= Number(remainingStoreCredit).toFixed(2) %></th>
+                </tr>
+              <% } %>
+            <% } %>
+            <% if (typeof pointsEarned !== 'undefined' && pointsEarned > 0) { %>
+              <tr>
+                <th class="text-end">Points Earned</th>
+                <th class="text-end text-primary">+<%= pointsEarned %> pts</th>
               </tr>
             <% } %>
             <tr class="table-active">

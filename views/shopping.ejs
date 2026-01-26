@@ -52,7 +52,16 @@
 <body>
   <%- include('partials/navbar2') %>
 
-  <div class="container mt-4">    <% if (errors && errors.length) { %>
+  <div class="container mt-4">
+    <!-- Refund Status Notification -->
+    <% if (typeof refundNotification !== 'undefined' && refundNotification) { %>
+      <div class="alert <%= refundNotification.type === 'refund-success' ? 'alert-success' : 'alert-danger' %> alert-dismissible fade show" role="alert" style="position: fixed; top: 80px; left: 50%; transform: translateX(-50%); z-index: 9999; min-width: 400px; max-width: 600px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+        <strong><%= refundNotification.type === 'refund-success' ? '✓ Success!' : '✗ Declined' %></strong> <%= refundNotification.message %>
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>
+    <% } %>
+
+    <% if (errors && errors.length) { %>
       <div class="alert alert-danger">
         <% errors.forEach(function(msg){ %><div><%= msg %></div><% }); %>
       </div>
@@ -138,6 +147,15 @@
 
 <script>
 document.addEventListener('DOMContentLoaded', function(){
+  // Auto-dismiss refund notification after 5 seconds
+  const refundAlert = document.querySelector('.alert[style*="position: fixed"]');
+  if (refundAlert) {
+    setTimeout(function() {
+      const bsAlert = bootstrap.Alert.getInstance(refundAlert) || new bootstrap.Alert(refundAlert);
+      bsAlert.close();
+    }, 5000);
+  }
+
   document.querySelectorAll('form.fav-ajax').forEach(function(form){
     form.addEventListener('submit', function(e){
       e.preventDefault();
