@@ -19,45 +19,93 @@ const RefundController = {
       return res.redirect('/purchases');
     }
 
-    // Verify the purchase belongs to the user
-    Purchase.getWithItems(purchaseId, sessionUser.userId, function(err, purchase) {
-      if (err) {
-        console.error('Purchase lookup error:', err);
-        req.flash && req.flash('error', 'Error verifying purchase: ' + err.message);
-        return res.redirect('/purchases');
-      }
-      
-      if (!purchase) {
-        console.error('Purchase not found for user:', sessionUser.userId);
-        req.flash && req.flash('error', 'Purchase not found.');
+    // First, check if user account is suspended
+    User.isSuspended(sessionUser.userId, function(suspendErr, suspendStatus) {
+      if (suspendErr) {
+        console.error('Error checking suspension status:', suspendErr);
+        req.flash && req.flash('error', 'Error verifying account status.');
         return res.redirect('/purchases');
       }
 
-      // Check if refund request already exists for this purchase
-      RefundRequest.existsForPurchase(purchaseId, function(existsErr, exists) {
-        if (existsErr) {
-          console.error('Refund existence check error:', existsErr);
-          req.flash && req.flash('error', 'Error checking refund status: ' + existsErr.message);
+      if (suspendStatus.suspended) {
+        const suspendedUntil = new Date(suspendStatus.until);
+        const remainingMinutes = Math.ceil((suspendedUntil - Date.now()) / 60000);
+        req.flash && req.flash('error', `Your account is temporarily suspended due to: ${suspendStatus.reason}. Please try again in ${remainingMinutes} minute(s).`);
+        return res.redirect('/purchases');
+      }
+
+      // Verify the purchase belongs to the user
+      Purchase.getWithItems(purchaseId, sessionUser.userId, function(err, purchase) {
+        if (err) {
+          console.error('Purchase lookup error:', err);
+          req.flash && req.flash('error', 'Error verifying purchase: ' + err.message);
+          return res.redirect('/purchases');
+        }
+        
+        if (!purchase) {
+          console.error('Purchase not found for user:', sessionUser.userId);
+          req.flash && req.flash('error', 'Purchase not found.');
           return res.redirect('/purchases');
         }
 
-        if (exists) {
-          console.warn('Refund already exists for purchase:', purchaseId);
-          req.flash && req.flash('warning', 'A refund request for this order already exists.');
-          return res.redirect('/purchases');
-        }
-
-        // Create new refund request
-        RefundRequest.create(purchaseId, sessionUser.userId, reason, function(createErr, result) {
-          if (createErr) {
-            console.error('RefundController.requestRefund - Create error:', createErr);
-            req.flash && req.flash('error', 'Failed to request refund: ' + createErr.message);
+        // Count how many times this user has requested refunds for this specific purchase
+        RefundRequest.countRefundAttemptsByPurchase(purchaseId, sessionUser.userId, function(countErr, attemptCount) {
+          if (countErr) {
+            console.error('Error counting refund attempts:', countErr);
+            req.flash && req.flash('error', 'Error processing refund request.');
             return res.redirect('/purchases');
           }
 
-          console.log('Refund request created successfully:', result);
-          req.flash && req.flash('success', 'Refund request submitted. Please wait for admin review.');
-          return res.redirect('/purchases');
+          console.log(`Refund attempts for purchase ${purchaseId} by user ${sessionUser.userId}: ${attemptCount}`);
+
+          // Security check: if user has already made 3 or more attempts, suspend the account
+          if (attemptCount >= 3) {
+            const suspensionDuration = 5; // 5 minutes
+            const suspensionReason = 'Excessive refund requests for the same purchase';
+            
+            User.suspendAccount(sessionUser.userId, suspensionDuration, suspensionReason, function(suspendErr) {
+              if (suspendErr) {
+                console.error('Error suspending account:', suspendErr);
+              }
+              
+              req.flash && req.flash('error', `Your account has been temporarily suspended for ${suspensionDuration} minutes due to excessive refund requests for the same invoice. Please contact support if you need assistance.`);
+              return res.redirect('/purchases');
+            });
+            return;
+          }
+
+          // Warn user if they're approaching the limit (2 attempts)
+          if (attemptCount === 2) {
+            req.flash && req.flash('warning', 'Warning: You have already requested a refund for this invoice twice. One more attempt will result in a temporary account suspension.');
+          }
+
+          // Check if refund request already exists for this purchase (pending or approved)
+          RefundRequest.existsForPurchase(purchaseId, function(existsErr, exists) {
+            if (existsErr) {
+              console.error('Refund existence check error:', existsErr);
+              req.flash && req.flash('error', 'Error checking refund status: ' + existsErr.message);
+              return res.redirect('/purchases');
+            }
+
+            if (exists) {
+              console.warn('Refund already exists for purchase:', purchaseId);
+              req.flash && req.flash('warning', 'A refund request for this order already exists.');
+              return res.redirect('/purchases');
+            }
+
+            // Create new refund request
+            RefundRequest.create(purchaseId, sessionUser.userId, reason, function(createErr, result) {
+              if (createErr) {
+                console.error('RefundController.requestRefund - Create error:', createErr);
+                req.flash && req.flash('error', 'Failed to request refund: ' + createErr.message);
+                return res.redirect('/purchases');
+              }
+
+              console.log('Refund request created successfully:', result);
+              req.flash && req.flash('success', 'Refund request submitted. Please wait for admin review.');
+              return res.redirect('/purchases');
+            });
+          });
         });
       });
     });

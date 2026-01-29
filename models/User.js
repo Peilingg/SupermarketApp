@@ -66,6 +66,51 @@ const User = {
             if (!row) return callback(null, false);
             return callback(null, row.role === 'admin');
         });
+    },
+
+    // Suspend user account for specified duration (in minutes)
+    suspendAccount: function(userId, durationMinutes, reason, callback) {
+        const suspensionEndTime = new Date(Date.now() + durationMinutes * 60 * 1000);
+        const sql = `
+            UPDATE users 
+            SET account_suspended_until = ?, suspension_reason = ?
+            WHERE userId = ?
+        `;
+        db.query(sql, [suspensionEndTime, reason, userId], function(err, result) {
+            return callback(err, result);
+        });
+    },
+
+    // Check if user account is currently suspended
+    isSuspended: function(userId, callback) {
+        const sql = `
+            SELECT account_suspended_until, suspension_reason 
+            FROM users 
+            WHERE userId = ? AND account_suspended_until > NOW()
+        `;
+        db.query(sql, [userId], function(err, results) {
+            if (err) return callback(err);
+            if (!results || results.length === 0) {
+                return callback(null, { suspended: false });
+            }
+            return callback(null, { 
+                suspended: true, 
+                until: results[0].account_suspended_until,
+                reason: results[0].suspension_reason
+            });
+        });
+    },
+
+    // Clear suspension (auto-cleanup or manual override)
+    clearSuspension: function(userId, callback) {
+        const sql = `
+            UPDATE users 
+            SET account_suspended_until = NULL, suspension_reason = NULL
+            WHERE userId = ?
+        `;
+        db.query(sql, [userId], function(err, result) {
+            return callback(err, result);
+        });
     }
 };
 

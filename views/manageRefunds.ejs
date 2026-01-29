@@ -113,11 +113,27 @@
                       </div>
                       <form action="/refund/<%= refund.refundRequestId %>/approve" method="POST">
                         <div class="modal-body">
-                          <p>Approve refund of <strong>$<%= Number(refund.refund_amount).toFixed(2) %></strong> for <strong><%= refund.username %></strong>?</p>
+                          <p>Approve refund for <strong><%= refund.username %></strong></p>
+                          
+                          <div class="mb-3">
+                            <label for="refundAmount<%= refund.refundRequestId %>" class="form-label">Refund Amount <span class="text-danger">*</span></label>
+                            <div class="input-group">
+                              <span class="input-group-text">$</span>
+                              <input type="number" class="form-control" id="refundAmount<%= refund.refundRequestId %>" name="refundAmount" 
+                                     value="<%= Number(refund.refund_amount).toFixed(2) %>" 
+                                     min="0.01" 
+                                     max="<%= Number(refund.refund_amount).toFixed(2) %>" 
+                                     step="0.01" 
+                                     required>
+                            </div>
+                            <small class="text-muted">Maximum refund: $<%= Number(refund.refund_amount).toFixed(2) %> (Original purchase amount)</small>
+                          </div>
+                          
                           <p class="text-muted">The refund will be added as store credit to their account.</p>
+                          
                           <div class="mb-3">
                             <label for="adminNotes<%= refund.refundRequestId %>" class="form-label">Admin Notes (Optional)</label>
-                            <textarea class="form-control" id="adminNotes<%= refund.refundRequestId %>" name="adminNotes" rows="2"></textarea>
+                            <textarea class="form-control" id="adminNotes<%= refund.refundRequestId %>" name="adminNotes" rows="2" placeholder="E.g., Partial refund for damaged item"></textarea>
                           </div>
                         </div>
                         <div class="modal-footer">

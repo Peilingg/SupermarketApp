@@ -16,7 +16,7 @@ const RefundController = require('./controllers/RefundController');
 const Purchase = require('./models/Purchase');
 const Voucher = require('./models/Voucher');
 const CartItem = require('./models/CartItem');
-const { checkAuthenticated, checkAdmin, validateRegistration } = require('./middleware');
+const { checkAuthenticated, checkAdmin, checkSuspension, validateRegistration } = require('./middleware');
 const netsService = require('./services/nets');
 const paypalService = require('./services/paypal');
 
@@ -348,7 +348,7 @@ app.post('/admin/purchase/items/:id/delete', checkAuthenticated, checkAdmin, (re
 });
 
 // Refund Request Routes (User)
-app.post('/refund/request/:purchaseId', checkAuthenticated, (req, res) => {
+app.post('/refund/request/:purchaseId', checkAuthenticated, checkSuspension, (req, res) => {
     RefundController.requestRefund(req, res);
 });
 app.get('/refundhistory', checkAuthenticated, (req, res) => {

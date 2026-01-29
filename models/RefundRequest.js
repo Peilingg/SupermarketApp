@@ -164,6 +164,18 @@ const RefundRequest = {
       if (err) return callback(err);
       return callback(null, results[0].count > 0);
     });
+  },
+
+  // Count total refund attempts for a specific purchase by a user (including rejected ones)
+  countRefundAttemptsByPurchase: function(purchaseId, userId, callback) {
+    const sql = `
+      SELECT COUNT(*) as count FROM refund_requests
+      WHERE purchaseId = ? AND userId = ?
+    `;
+    db.query(sql, [purchaseId, userId], function(err, results) {
+      if (err) return callback(err);
+      return callback(null, results[0].count);
+    });
   }
 };
 
