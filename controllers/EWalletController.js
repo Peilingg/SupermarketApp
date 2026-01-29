@@ -1,5 +1,6 @@
 const EWallet = require('../models/EWallet');
 const User = require('../models/User');
+const RefundRequest = require('../models/RefundRequest');
 
 const EWalletController = {
   // View e-wallet dashboard
@@ -32,17 +33,24 @@ const EWalletController = {
           const lastTopupDate = lastTopup ? lastTopup.createdAt : null;
 
           EWallet.getPointsTransactions(sessionUser.userId, 50, (ptxnErr, pointsTransactions) => {
-            return res.render('ewallet', {
-              user: user,
-              ewallet_balance: user.ewallet_balance || 0,
-              points_balance: user.points_balance || 0,
-              store_credit: user.store_credit || 0,
-              auto_convert_points: user.auto_convert_points || 0,
-              lastTopupMethod: lastTopupMethod,
-              lastTopupDate: lastTopupDate,
-              transactions: txns,
-              pointsTransactions: pointsTransactions || [],
-              conversionRate: 100 // 100 points = $1
+            // Fetch store credit transactions
+            EWallet.getStoreCreditTransactions(sessionUser.userId, 50, (scTxnErr, storeCreditTransactions) => {
+              RefundRequest.listByUser(sessionUser.userId, (refundErr, refunds) => {
+                return res.render('ewallet', {
+                  user: user,
+                  ewallet_balance: user.ewallet_balance || 0,
+                  points_balance: user.points_balance || 0,
+                  store_credit: user.store_credit || 0,
+                  auto_convert_points: user.auto_convert_points || 0,
+                  lastTopupMethod: lastTopupMethod,
+                  lastTopupDate: lastTopupDate,
+                  transactions: txns,
+                  pointsTransactions: pointsTransactions || [],
+                  storeCreditTransactions: storeCreditTransactions || [],
+                  refunds: refunds || [],
+                  conversionRate: 100 // 100 points = $1
+                });
+              });
             });
           });
         });
@@ -55,12 +63,13 @@ const EWalletController = {
     if (!sessionUser || !sessionUser.userId) return res.redirect('/login');
 
     User.getById(sessionUser.userId, (userErr, user) => {
-      const paymentMethods = ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'E-Wallet', 'PayPal'];
+      const paymentMethods = ['Credit/Debit card', 'PayPal', 'NETS QR'];
       
       return res.render('topupWallet', {
         user: user || sessionUser,
         paymentMethods,
-        ewallet_balance: (user && user.ewallet_balance) || 0
+        ewallet_balance: (user && user.ewallet_balance) || 0,
+        paypalClientId: process.env.PAYPAL_CLIENT_ID
       });
     });
   },
@@ -73,6 +82,11 @@ const EWalletController = {
     const paymentMethod = req.body.paymentMethod || 'Credit/Debit card';
     const topupAmount = parseFloat(req.body.topupAmount || 0);
 
+    console.log('=== TOPUP PROCESS DEBUG ===');
+    console.log('Payment Method:', paymentMethod);
+    console.log('Top-up Amount:', topupAmount);
+    console.log('All req.body:', req.body);
+
     if (!topupAmount || topupAmount <= 0) {
       req.flash && req.flash('error', 'Please enter a valid amount');
       return res.redirect('/ewallet/topup');
@@ -83,6 +97,52 @@ const EWalletController = {
       return res.redirect('/ewallet/topup');
     }
 
+    // Validate credit/debit card if selected
+    if (paymentMethod === 'Credit/Debit card') {
+      const { cardholderName, cardNumber, expiryDate, cvv } = req.body;
+      
+      console.log('Card validation - Name:', cardholderName, 'Number:', cardNumber);
+      
+      // Validate cardholder name
+      if (!cardholderName || !cardholderName.trim()) {
+        req.flash && req.flash('error', 'Cardholder name is required');
+        return res.redirect('/ewallet/topup');
+      }
+
+      // Validate card number (exactly 16 digits)
+      const cleanCardNumber = cardNumber ? cardNumber.replace(/\s/g, '') : '';
+      if (!/^\d{16}$/.test(cleanCardNumber)) {
+        req.flash && req.flash('error', 'Card number must be 16 digits');
+        return res.redirect('/ewallet/topup');
+      }
+
+      // Validate expiry date format (MM/YY) and not expired
+      if (!/^\d{2}\/\d{2}$/.test(expiryDate)) {
+        req.flash && req.flash('error', 'Expiry date must be in MM/YY format');
+        return res.redirect('/ewallet/topup');
+      }
+
+      const [month, year] = expiryDate.split('/');
+      const currentDate = new Date();
+      const currentYear = currentDate.getFullYear() % 100; // Get last 2 digits
+      const currentMonth = currentDate.getMonth() + 1; // Months are 0-indexed
+      const cardYear = parseInt(year);
+      const cardMonth = parseInt(month);
+
+      if (cardYear < currentYear || (cardYear === currentYear && cardMonth < currentMonth)) {
+        req.flash && req.flash('error', 'Card has expired');
+        return res.redirect('/ewallet/topup');
+      }
+
+      // Validate CVV (3-4 digits)
+      if (!/^\d{3,4}$/.test(cvv)) {
+        req.flash && req.flash('error', 'CVV must be 3-4 digits');
+        return res.redirect('/ewallet/topup');
+      }
+
+      console.log('✓ Credit card validation passed for:', cardholderName);
+    }
+
     // Store topup data in session
     req.session.topupData = {
       userId: sessionUser.userId,
@@ -91,27 +151,40 @@ const EWalletController = {
       timestamp: new Date()
     };
 
-    // Redirect to payment method handler
-    if (paymentMethod === 'PayPal') {
-      return res.redirect('/ewallet/topup/paypal');
-    } else {
-      // For other payment methods, create transaction record and show confirmation
-      EWallet.createPendingTransaction(sessionUser.userId, topupAmount, paymentMethod, `TOPUP-${Date.now()}`, (err, txnResult) => {
-        if (err) {
-          console.error('Failed to create transaction:', err);
-          req.flash && req.flash('error', 'Failed to process top-up');
-          return res.redirect('/ewallet/topup');
-        }
+    console.log('About to process - Payment Method is:', paymentMethod);
 
-        req.session.transactionId = txnResult.insertId;
-        res.render('topupConfirmation', {
-          user: sessionUser,
-          amount: topupAmount,
-          paymentMethod: paymentMethod,
-          transactionId: txnResult.insertId
+    // Save session and redirect to payment method specific pages
+    req.session.save((err) => {
+      if (err) {
+        console.error('Session save error:', err);
+        req.flash && req.flash('error', 'Session error. Please try again.');
+        return res.redirect('/ewallet/topup');
+      }
+
+      // Redirect to payment method specific pages
+      if (paymentMethod === 'PayPal') {
+        console.log('Redirecting to PayPal');
+        return res.redirect('/ewallet/topup/paypal');
+      } else if (paymentMethod === 'NETS QR') {
+        console.log('Redirecting to NETS QR');
+        return res.redirect('/ewallet/topup/nets-qr');
+      } else {
+        console.log('Processing Credit/Debit card - adding funds directly');
+        // Credit/Debit card: automatically add funds (no confirmation page needed)
+        const transactionId = `TOPUP-${Date.now()}`;
+        EWallet.addFunds(sessionUser.userId, topupAmount, paymentMethod, transactionId, (err, result) => {
+          if (err) {
+            console.error('Failed to add funds:', err);
+            req.flash && req.flash('error', 'Failed to complete top-up');
+            return res.redirect('/ewallet/topup');
+          }
+
+          console.log('✓ Funds added successfully, redirecting to /ewallet');
+          req.flash && req.flash('success', `Successfully topped up $${parseFloat(topupAmount).toFixed(2)} to your e-wallet`);
+          return res.redirect('/ewallet');
         });
-      });
-    }
+      }
+    });
   },
 
   // Confirm top-up (after payment)

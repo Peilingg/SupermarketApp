@@ -133,7 +133,7 @@
 
             <!-- Action Buttons -->
             <div class="button-group">
-                <a href="/checkout" class="btn btn-outline-secondary btn-custom">
+                <a href="<%= isTopup ? '/ewallet/topup' : '/checkout' %>" class="btn btn-outline-secondary btn-custom">
                     <i class="bi bi-arrow-left"></i> Cancel Payment
                 </a>
             </div>
@@ -155,6 +155,9 @@
 
         const txnRetrievalRef = "<%= txnRetrievalRef %>"; // Transaction reference
         const courseInitId = "<%= courseInitId %>"; // Course Init ID
+        const isTopup = <%= isTopup ? 'true' : 'false' %>;
+        const successPath = isTopup ? '/nets-qr/topup/success' : '/nets-qr/success';
+        const failPath = isTopup ? '/nets-qr/topup/fail' : '/nets-qr/fail';
         const url = `/sse/payment-status/${txnRetrievalRef}?course_init_id=${encodeURIComponent(courseInitId || '')}`; 
    
         const headers = {
@@ -179,11 +182,11 @@
             if (data.success) {
                 console.log("✓ Payment Success Event Received!");
                 if (s2sNetsTxnStatus) s2sNetsTxnStatus.close();
-                window.location.href = `/nets-qr/success?txn_retrieval_ref=${txnRetrievalRef}`;
+                window.location.href = `${successPath}?txn_retrieval_ref=${txnRetrievalRef}`;
             } else if (data.fail) {
                 console.log("✗ Payment Fail Event Received!");
                 if (s2sNetsTxnStatus) s2sNetsTxnStatus.close();
-                window.location.href = `/nets-qr/fail?txn_retrieval_ref=${txnRetrievalRef}`;
+                window.location.href = `${failPath}?txn_retrieval_ref=${txnRetrievalRef}`;
             } else {
                 console.log("Waiting for payment status... current event:", data);
             }
@@ -209,7 +212,7 @@
                 if (s2sNetsTxnStatus) {
                     s2sNetsTxnStatus.close();
                 }
-                window.location.href = `/nets-qr/fail?txn_retrieval_ref=${txnRetrievalRef}`; // Redirect to fail page
+                window.location.href = `${failPath}?txn_retrieval_ref=${txnRetrievalRef}`; // Redirect to correct fail page
             }
         };
 

@@ -94,7 +94,7 @@ const RefundRequest = {
   },
 
   // Approve refund request (add store credit to user)
-  approve: function(refundRequestId, adminNotes, callback) {
+  approve: function(refundRequestId, adminNotes, customRefundAmount, callback) {
     // First, get the refund request and amount
     const getRefundSql = `
       SELECT rr.userId, p.total, rr.status
@@ -108,7 +108,16 @@ const RefundRequest = {
       if (results[0].status !== 'pending') return callback(new Error('Refund is not in pending status'));
 
       const userId = results[0].userId;
-      const refundAmount = Number(results[0].total || 0);
+      const purchaseTotal = Number(results[0].total || 0);
+      const refundAmount = Number(customRefundAmount || 0);
+
+      // Validate refund amount does not exceed purchase total
+      if (refundAmount > purchaseTotal) {
+        return callback(new Error(`Refund amount ($${refundAmount.toFixed(2)}) cannot exceed purchase total ($${purchaseTotal.toFixed(2)})`));
+      }
+      if (refundAmount <= 0) {
+        return callback(new Error('Refund amount must be greater than zero'));
+      }
 
       // Update refund request status to approved
       const updateRefundSql = `

@@ -14,6 +14,7 @@
 </head>
 <body>
   <div class="container my-4">
+    <% const resolvedStatus = 'Paid'; %>
     <div class="alert alert-success">
       Payment received. This invoice serves as your receipt.
     </div>
@@ -140,18 +141,23 @@
                 <th class="text-end">Voucher (<%= voucher.code %>)</th>
                 <th class="text-end text-success">- $<%= Number(voucherDiscount).toFixed(2) %></th>
               </tr>
+            <% } else if (paymentDetails && paymentDetails.match(/Voucher/)) { %>
+              <tr>
+                <th class="text-end">Voucher</th>
+                <th class="text-end text-success"><%= paymentDetails %></th>
+              </tr>
             <% } %>
             <% 
-              // Only show store credit deduction if it's a PARTIAL payment (not full coverage)
+              // Only show store credit deduction if it's used
               const baseTotal = typeof subtotal !== 'undefined' ? subtotal : 0;
               const taxAmount = typeof tax !== 'undefined' ? tax : 0;
               const shippingAmount = typeof shipping !== 'undefined' ? shipping : 0;
               const voucherAmt = typeof voucherDiscount !== 'undefined' ? voucherDiscount : 0;
               const calculatedTotal = baseTotal + taxAmount + shippingAmount - voucherAmt;
               const creditUsedAmount = typeof storeCreditUsed !== 'undefined' ? storeCreditUsed : 0;
-              const isPartialPayment = creditUsedAmount > 0 && calculatedTotal > 0;
+              const ewalletPaid = typeof ewalletUsed !== 'undefined' ? ewalletUsed : 0;
             %>
-            <% if (isPartialPayment) { %>
+            <% if (creditUsedAmount > 0) { %>
               <tr>
                 <th class="text-end">Store Credit Used</th>
                 <th class="text-end text-success">- $<%= Number(creditUsedAmount).toFixed(2) %></th>

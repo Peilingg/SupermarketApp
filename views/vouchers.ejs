@@ -139,9 +139,15 @@
       </div>
     </div>
 
-    <div class="text-end">
-      <a href="/checkout" class="btn btn-success">Go to checkout</a>
-    </div>
+    <% if (cartItemCount && cartItemCount > 0) { %>
+      <div class="text-end">
+        <a href="/checkout" class="btn btn-success">Go to checkout</a>
+      </div>
+    <% } else { %>
+      <div class="alert alert-info text-center">
+        Your cart is empty. <a href="/shopping" class="alert-link">Start shopping</a> to use your vouchers at checkout.
+      </div>
+    <% } %>
   </div>
 </body>
 </html>

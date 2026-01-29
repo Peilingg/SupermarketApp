@@ -323,6 +323,9 @@ app.get('/manageusers', checkAuthenticated, checkAdmin, (req, res) => {
 app.get('/purchases', checkAuthenticated, (req, res) => {
     PurchaseController.listByUser(req, res);
 });
+app.get('/purchases/:purchaseId/invoice', checkAuthenticated, (req, res) => {
+  PurchaseController.showInvoice(req, res);
+});
 // Reorder past purchase items -> adds back to cart
 app.post('/purchases/:purchaseId/reorder', checkAuthenticated, (req, res) => {
     PurchaseController.reorder(req, res);
@@ -405,7 +408,7 @@ app.get('/checkout', checkAuthenticated, (req, res) => {
   const sessionUser = req.session && req.session.user;
   if (!sessionUser || !sessionUser.userId) return res.redirect('/login');
 
-  const paymentMethods = ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'E-Wallet', 'PayPal', 'NETS QR'];
+  const paymentMethods = ['Credit/Debit card', 'E-Wallet', 'PayPal', 'NETS QR'];
   const paymentMethod = req.query.paymentMethod || paymentMethods[0];
 
   // Fetch full user data including store_credit
@@ -424,13 +427,30 @@ app.get('/checkout', checkAuthenticated, (req, res) => {
         return Object.assign({}, it, { price, quantity: qty, lineTotal: +(price * qty) });
       });
 
+      // Check if cart is empty
+      if (!mapped || mapped.length === 0) {
+        req.flash && req.flash('error', 'Your cart is empty. Add items before checking out.');
+        return res.redirect('/shopping');
+      }
+
       const subtotal = mapped.reduce((s, i) => s + (i.lineTotal || 0), 0);
       const tax = +((subtotal * 0.07)).toFixed(2);             // adjust tax rule if needed
       const shipping = +(subtotal > 50 ? 0 : 5).toFixed(2);     // adjust shipping rule if needed
       const appliedVoucher = req.session.appliedVoucher || null;
-      const voucherCalc = VoucherController.computeDiscount(appliedVoucher, subtotal);
+      console.log('Checkout - Applied Voucher:', appliedVoucher);
+      
+      // Apply voucher to TOTAL (subtotal + tax + shipping), not just subtotal
+      const preVoucherTotal = +(subtotal + tax + shipping).toFixed(2);
+      const voucherCalc = VoucherController.computeDiscount(appliedVoucher, preVoucherTotal);
+      console.log('Checkout - Voucher Calc:', voucherCalc);
       const voucherDiscount = +(voucherCalc.discount || 0).toFixed(2);
-      const total = +(subtotal + tax + shipping - voucherDiscount).toFixed(2);
+      console.log('Checkout - Voucher Discount:', voucherDiscount);
+      const voucherTooLarge = voucherDiscount >= preVoucherTotal;
+      if (voucherTooLarge) {
+        req.flash && req.flash('error', 'Voucher value is greater than or equal to your order total. Please add more items before using this voucher.');
+      }
+      const total = Math.max(0, +(preVoucherTotal - voucherDiscount).toFixed(2));
+      console.log('Checkout - Final Total:', total, 'Pre-voucher:', preVoucherTotal);
 
       // Store checkout data in session for PayPal flow
       req.session.checkoutData = {
@@ -438,22 +458,30 @@ app.get('/checkout', checkAuthenticated, (req, res) => {
         subtotal, tax, shipping, total,
         appliedVoucher,
         voucherDiscount,
+        voucherTooLarge,
         storeCreditUsed: 0 // Will be updated if user toggles store credit
       };
 
-      res.render('confirmationPurchase', {
-        user: fullUser,
-        items: mapped,
-        subtotal, tax, shipping, total,
-        voucher: appliedVoucher,
-        voucherDiscount,
-        voucherReason: voucherCalc.reason || null,
-        invoice: false,
-        paymentMethod,
-        paymentDetails: null,
-        paymentMethods,
-        orderId: null,
-        process: { env: { PAYPAL_CLIENT_ID: process.env.PAYPAL_CLIENT_ID } }
+      // Fetch user's claimed vouchers for dropdown
+      Voucher.listUserVouchers(sessionUser.userId, (vErr, userVouchers) => {
+        const claimedVouchers = (userVouchers || []).filter(v => v && v.status === 'claimed');
+        
+        res.render('confirmationPurchase', {
+          user: fullUser,
+          items: mapped,
+          subtotal, tax, shipping, total,
+          voucher: appliedVoucher,
+          voucherDiscount,
+          voucherTooLarge,
+          voucherReason: voucherCalc.reason || null,
+          claimedVouchers: claimedVouchers,
+          invoice: false,
+          paymentMethod,
+          paymentDetails: null,
+          paymentMethods,
+          orderId: null,
+          process: { env: { PAYPAL_CLIENT_ID: process.env.PAYPAL_CLIENT_ID } }
+        });
       });
     });
   });
@@ -465,8 +493,50 @@ app.post('/checkout/confirm', checkAuthenticated, async (req, res) => {
   const sessionUser = req.session && req.session.user;
   if (!sessionUser || !sessionUser.userId) return res.redirect('/login');
 
-  const paymentMethods = ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'E-Wallet', 'PayPal', 'NETS QR'];
+  const paymentMethods = ['Credit/Debit card', 'E-Wallet', 'PayPal', 'NETS QR'];
   const paymentMethod = req.body.paymentMethod || paymentMethods[0];
+
+  // Validate credit/debit card details if selected
+  if (paymentMethod === 'Credit/Debit card') {
+    const { cardholderName, cardNumber, expiryDate, cvv } = req.body;
+
+    // Validate cardholder name
+    if (!cardholderName || !cardholderName.trim()) {
+      req.flash && req.flash('error', 'Cardholder name is required');
+      return res.redirect('/checkout');
+    }
+
+    // Validate card number (16 digits)
+    const cardNum = (cardNumber || '').replace(/\s+/g, '');
+    if (!/^\d{16}$/.test(cardNum)) {
+      req.flash && req.flash('error', 'Card number must be exactly 16 digits');
+      return res.redirect('/checkout');
+    }
+
+    // Validate expiry date (MM/YY format and not expired)
+    if (!expiryDate || !/^\d{2}\/\d{2}$/.test(expiryDate)) {
+      req.flash && req.flash('error', 'Expiry date must be in MM/YY format');
+      return res.redirect('/checkout');
+    }
+
+    const [month, year] = expiryDate.split('/');
+    const now = new Date();
+    const currentYear = now.getFullYear() % 100;
+    const currentMonth = now.getMonth() + 1;
+
+    if (parseInt(year) < currentYear || (parseInt(year) === currentYear && parseInt(month) < currentMonth)) {
+      req.flash && req.flash('error', 'Card has expired');
+      return res.redirect('/checkout');
+    }
+
+    // Validate CVV (3-4 digits)
+    if (!/^\d{3,4}$/.test(cvv || '')) {
+      req.flash && req.flash('error', 'CVV must be 3-4 digits');
+      return res.redirect('/checkout');
+    }
+
+    console.log('✓ Credit card validation passed for:', cardholderName);
+  }
 
   CartItem.listAll(sessionUser.userId, async (err, items) => {
     if (err) return res.status(500).send('Server error');
@@ -480,31 +550,58 @@ app.post('/checkout/confirm', checkAuthenticated, async (req, res) => {
     const tax = +((subtotal * 0.07)).toFixed(2);
     const shipping = +(subtotal > 50 ? 0 : 5).toFixed(2);
     const appliedVoucher = req.session.appliedVoucher || null;
-    const voucherCalc = VoucherController.computeDiscount(appliedVoucher, subtotal);
+    
+    // Apply voucher to TOTAL (subtotal + tax + shipping), not just subtotal
+    const preVoucherTotal = +(subtotal + tax + shipping).toFixed(2);
+    const voucherCalc = VoucherController.computeDiscount(appliedVoucher, preVoucherTotal);
     const voucherDiscount = +(voucherCalc.discount || 0).toFixed(2);
 
-    // Handle store credit and e-wallet
+    // Block checkout when voucher discount exceeds order total
+    if (voucherDiscount >= preVoucherTotal) {
+      req.flash && req.flash('error', 'Voucher value is greater than or equal to the order total. Please adjust your cart or voucher.');
+      return res.redirect('/checkout');
+    }
+
+    // Handle store credit (can be toggled on/off)
     const useStoreCredit = req.body.useStoreCredit === 'true';
     const storeCreditUsed = useStoreCredit ? parseFloat(req.body.storeCreditUsed || 0) : 0;
-    const useEwallet = req.body.useEwallet === 'true';
-    let ewalletUsed = useEwallet ? parseFloat(req.body.ewalletUsed || 0) : 0;
 
     const baseTotal = +(subtotal + tax + shipping - voucherDiscount).toFixed(2);
 
-    // Validate e-wallet amount server-side
-    const { getBalance } = require('./models/EWallet');
-    let validatedEwalletUsed = 0;
+    // Validate store credit amount server-side
+    let validatedStoreCreditUsed = 0;
     await new Promise((resolve) => {
-      if (!useEwallet || ewalletUsed <= 0) return resolve();
-      getBalance(sessionUser.userId, (balErr, bal) => {
-        const available = bal && bal.ewallet_balance ? Number(bal.ewallet_balance) : 0;
-        const remainingAfterCredit = Math.max(0, baseTotal - storeCreditUsed);
-        validatedEwalletUsed = Math.max(0, Math.min(ewalletUsed, available, remainingAfterCredit));
+      if (!useStoreCredit || storeCreditUsed <= 0) return resolve();
+      const User = require('./models/User');
+      User.getById(sessionUser.userId, (userErr, user) => {
+        const available = user && user.store_credit ? Number(user.store_credit) : 0;
+        validatedStoreCreditUsed = Math.max(0, Math.min(storeCreditUsed, available, baseTotal));
         resolve();
       });
     });
-    ewalletUsed = +(+validatedEwalletUsed).toFixed(2);
-    const total = +(Math.max(0, baseTotal - storeCreditUsed - ewalletUsed)).toFixed(2);
+    const finalStoreCreditUsed = +(+validatedStoreCreditUsed).toFixed(2);
+    
+    // If E-Wallet is selected as payment method, ensure sufficient balance and deduct remaining amount
+    let ewalletUsed = 0;
+    if (paymentMethod === 'E-Wallet') {
+      const amountNeeded = +(Math.max(0, baseTotal - finalStoreCreditUsed)).toFixed(2);
+      const { getBalance } = require('./models/EWallet');
+      const available = await new Promise((resolve) => {
+        getBalance(sessionUser.userId, (balErr, bal) => {
+          const avail = bal && bal.ewallet_balance ? Number(bal.ewallet_balance) : 0;
+          resolve(avail);
+        });
+      });
+
+      if (available + 1e-6 < amountNeeded) {
+        req.flash && req.flash('error', `Insufficient e-wallet balance. Available: $${available.toFixed(2)}, required: $${amountNeeded.toFixed(2)}.`);
+        return res.redirect('/checkout');
+      }
+
+      ewalletUsed = amountNeeded;
+    }
+
+    const total = +(Math.max(0, baseTotal - finalStoreCreditUsed - ewalletUsed)).toFixed(2);
 
     // Determine actual payment method based on store credit/e-wallet usage
     let actualPaymentMethod = paymentMethod;
@@ -571,19 +668,77 @@ app.post('/checkout/confirm', checkAuthenticated, async (req, res) => {
         voucherDiscount,
         storeCreditUsed,
         ewalletUsed,
-        paymentMethod: actualPaymentMethod
+        paymentMethod: actualPaymentMethod,
+        isCheckout: true
       };
 
       // Pass data to generateQrCode - add cartTotal to body
       req.body.cartTotal = total;
 
-      // Call the NETS QR service to generate QR code
+      // Call the NETS QR service to generate QR code (this will render netsQr.ejs)
       return netsService.generateQrCode(req, res);
     }
 
-    // REGULAR PAYMENT METHODS (Credit/Debit, Apple Pay, E-Wallet)
+    // E-WALLET PAYMENT HANDLING
+    if (paymentMethod === 'E-Wallet') {
+      const amountToPay = +(baseTotal - finalStoreCreditUsed).toFixed(2);
+      const { getBalance } = require('./models/EWallet');
+      const Purchase = require('./models/Purchase');
+      
+      // Check e-wallet balance
+      const balance = await new Promise((resolve) => {
+        getBalance(sessionUser.userId, (err, result) => {
+          resolve(result && result.ewallet_balance ? Number(result.ewallet_balance) : 0);
+        });
+      });
+      
+      if (balance < amountToPay) {
+        req.flash && req.flash('error', `Insufficient e-wallet balance. You have $${balance.toFixed(2)}, but need $${amountToPay.toFixed(2)}`);
+        return res.redirect('/checkout');
+      }
+      
+      // Record purchase
+      const summary = {
+        subtotal, tax, shipping,
+        total: amountToPay,
+        paymentMethod: 'E-Wallet',
+        paymentDetails: 'E-Wallet Payment'
+      };
+      
+      Purchase.record(sessionUser.userId, summary, mapped, (saveErr, purchaseId) => {
+        if (saveErr) {
+          req.flash && req.flash('error', 'Failed to process payment');
+          return res.redirect('/checkout');
+        }
+        
+        // Deduct from e-wallet
+        const EWallet = require('./models/EWallet');
+        EWallet.deductFunds(sessionUser.userId, amountToPay, 'Checkout payment', () => {
+          // Clear cart and voucher
+          const CartItem = require('./models/CartItem');
+          CartItem.clear(sessionUser.userId, () => {
+            req.session.appliedVoucher = null;
+            req.session.save(() => {
+              res.render('invoice', {
+                user: sessionUser,
+                items: mapped,
+                subtotal, tax, shipping, 
+                total: amountToPay,
+                voucher: appliedVoucher,
+                voucherDiscount,
+                storeCreditUsed,
+                ewalletUsed: amountToPay,
+                orderId: purchaseId,
+                generatedAt: new Date()
+              });
+            });
+          });
+        });
+      });
+    }
+
+    // REGULAR PAYMENT METHODS (Credit/Debit)
     const paymentDetails = actualPaymentDetails || (method => {
-      if (method === 'Contactless payment (Apple Pay)') return 'Pay with your linked Apple Pay device.';
       if (method === 'E-Wallet') return 'Pay using your e-wallet balance';
       return 'Visa / Mastercard / AMEX supported.';
     })(actualPaymentMethod);
@@ -607,6 +762,9 @@ app.post('/checkout/confirm', checkAuthenticated, async (req, res) => {
         const deductSql = 'UPDATE users SET store_credit = GREATEST(0, store_credit - ?) WHERE userId = ?';
         require('./db').query(deductSql, [storeCreditUsed, sessionUser.userId], (creditErr) => {
           if (creditErr) console.error('Failed to deduct store credit', creditErr);
+          // Log store credit transaction
+          const EWallet = require('./models/EWallet');
+          EWallet.logStoreCreditTransaction(sessionUser.userId, -storeCreditUsed, 'store_credit_used', `Used store credit for Order #${finalOrderId}`);
         });
       }
 
@@ -618,9 +776,9 @@ app.post('/checkout/confirm', checkAuthenticated, async (req, res) => {
         });
       }
 
-      // Award points for this purchase ($1 = 10 points based on subtotal)
-      if (!saveErr && subtotal > 0) {
-        const pointsEarned = Math.floor(subtotal * 10);
+      // Award points for this purchase ($1 = 10 points based on total paid)
+      if (!saveErr && total > 0) {
+        const pointsEarned = Math.floor(total * 10);
         const EWallet = require('./models/EWallet');
         EWallet.addPoints(sessionUser.userId, pointsEarned, `Points earned from Order #${finalOrderId}`, finalOrderId, (pointsErr) => {
           if (pointsErr) console.error('Failed to add points:', pointsErr);
@@ -637,12 +795,13 @@ app.post('/checkout/confirm', checkAuthenticated, async (req, res) => {
       CartItem.clear(sessionUser.userId, (clearErr) => {
         if (clearErr) console.error('Checkout confirm -> clear cart failed', clearErr);
 
-        // Fetch updated user data to show remaining store credit and points
+        // Fetch updated user data to show remaining store credit, e-wallet and points
         const User = require('./models/User');
         User.getById(sessionUser.userId, (userErr, updatedUser) => {
           const userToDisplay = updatedUser || req.session.user;
           const remainingStoreCredit = updatedUser ? (updatedUser.store_credit || 0) : (req.session.user.store_credit || 0);
-          const pointsEarned = Math.floor(subtotal * 10);
+          const remainingEwallet = updatedUser ? (updatedUser.ewallet_balance || 0) : (req.session.user.ewallet_balance || 0);
+          const pointsEarned = Math.floor(total * 10);
           
           res.render('invoice', {
             user: userToDisplay,
@@ -653,6 +812,7 @@ app.post('/checkout/confirm', checkAuthenticated, async (req, res) => {
             storeCreditUsed,
             ewalletUsed,
             remainingStoreCredit,
+            remainingEwallet,
             pointsEarned,
             invoice: true,
             paymentMethod: actualPaymentMethod,
@@ -682,7 +842,10 @@ app.post('/api/paypal/create-order', checkAuthenticated, async (req, res) => {
     
     // Validate amount matches session data or recalculate
     if (req.session.checkoutData) {
-      const { subtotal, tax, shipping, voucherDiscount } = req.session.checkoutData;
+      const { subtotal, tax, shipping, voucherDiscount, voucherTooLarge } = req.session.checkoutData;
+      if (voucherTooLarge) {
+        return res.status(400).json({ error: 'Voucher value exceeds order total. Please add more items before using this voucher.' });
+      }
       const baseTotal = +(subtotal + tax + shipping - voucherDiscount).toFixed(2);
       const expectedTotal = +(Math.max(0, baseTotal - storeCreditNum - ewalletNum)).toFixed(2);
       
@@ -746,6 +909,9 @@ app.post('/api/paypal/capture-order', checkAuthenticated, async (req, res) => {
           const deductSql = 'UPDATE users SET store_credit = GREATEST(0, store_credit - ?) WHERE userId = ?';
           require('./db').query(deductSql, [checkoutData.storeCreditUsed, sessionUser.userId], (creditErr) => {
             if (creditErr) console.error('Failed to deduct store credit', creditErr);
+            // Log store credit transaction
+            const EWallet = require('./models/EWallet');
+            EWallet.logStoreCreditTransaction(sessionUser.userId, -checkoutData.storeCreditUsed, 'store_credit_used', `Used store credit for PayPal Order #${purchaseId}`);
           });
         }
 
@@ -757,9 +923,9 @@ app.post('/api/paypal/capture-order', checkAuthenticated, async (req, res) => {
           });
         }
 
-        // Award points for this purchase ($1 = 10 points based on subtotal)
-        if (checkoutData.subtotal > 0) {
-          const pointsEarned = Math.floor(checkoutData.subtotal * 10);
+        // Award points for this purchase ($1 = 10 points based on total paid)
+        if (checkoutData.total > 0) {
+          const pointsEarned = Math.floor(checkoutData.total * 10);
           const EWallet = require('./models/EWallet');
           EWallet.addPoints(sessionUser.userId, pointsEarned, `Points earned from PayPal Order #${purchaseId}`, purchaseId, (pointsErr) => {
             if (pointsErr) console.error('Failed to add points:', pointsErr);
@@ -977,12 +1143,15 @@ app.get('/nets-qr/success', checkAuthenticated, (req, res) => {
       const deductSql = 'UPDATE users SET store_credit = GREATEST(0, store_credit - ?) WHERE userId = ?';
       require('./db').query(deductSql, [checkoutData.storeCreditUsed, sessionUser.userId], (creditErr) => {
         if (creditErr) console.error('Failed to deduct store credit', creditErr);
+        // Log store credit transaction
+        const EWallet = require('./models/EWallet');
+        EWallet.logStoreCreditTransaction(sessionUser.userId, -checkoutData.storeCreditUsed, 'store_credit_used', `Used store credit for NETS QR Order #${purchaseId}`);
       });
     }
 
-    // Award points for this purchase ($1 = 10 points based on subtotal)
-    if (checkoutData.subtotal > 0) {
-      const pointsEarned = Math.floor(checkoutData.subtotal * 10);
+    // Award points for this purchase ($1 = 10 points based on total paid)
+    if (checkoutData.total > 0) {
+      const pointsEarned = Math.floor(checkoutData.total * 10);
       const EWallet = require('./models/EWallet');
       EWallet.addPoints(sessionUser.userId, pointsEarned, `Points earned from NETS QR Order #${purchaseId}`, purchaseId, (pointsErr) => {
         if (pointsErr) console.error('Failed to add points:', pointsErr);
@@ -1035,7 +1204,7 @@ app.get('/nets-qr/success', checkAuthenticated, (req, res) => {
         invoice: true,
         paymentMethod: checkoutData.paymentMethod || 'NETS QR',
         paymentDetails: `NETS QR Transaction Ref: ${req.query.txn_retrieval_ref || 'N/A'}`,
-        paymentMethods: ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'E-Wallet', 'PayPal', 'NETS QR'],
+        paymentMethods: ['Credit/Debit card', 'E-Wallet', 'PayPal', 'NETS QR'],
         orderId: purchaseId,
         generatedAt: new Date()
       });
@@ -1092,6 +1261,636 @@ app.post('/ewallet/convert-points', checkAuthenticated, (req, res) => {
 // Toggle auto-convert points preference
 app.post('/ewallet/auto-convert', checkAuthenticated, (req, res) => {
   EWalletController.toggleAutoConvert(req, res);
+});
+
+// E-Wallet Top-up via PayPal
+app.get('/ewallet/topup/paypal', checkAuthenticated, (req, res) => {
+  const sessionUser = req.session && req.session.user;
+  if (!sessionUser || !sessionUser.userId) return res.redirect('/login');
+  
+  const topupData = req.session.topupData;
+  if (!topupData) {
+    req.flash && req.flash('error', 'Invalid top-up request');
+    return res.redirect('/ewallet/topup');
+  }
+
+  const User = require('./models/User');
+  User.getById(sessionUser.userId, (userErr, user) => {
+    return res.render('topupPaypal', {
+      user: user || sessionUser,
+      amount: topupData.amount,
+      paymentMethod: topupData.paymentMethod,
+      paypalClientId: process.env.PAYPAL_CLIENT_ID
+    });
+  });
+});
+
+// E-Wallet Top-up PayPal: Create Order
+app.post('/api/paypal/topup/create-order', checkAuthenticated, async (req, res) => {
+  try {
+    const topupData = req.session.topupData;
+    if (!topupData) {
+      return res.status(400).json({ error: 'No top-up data in session' });
+    }
+
+    const amount = topupData.amount.toFixed(2);
+    console.log('Creating PayPal order for e-wallet top-up:', amount);
+
+    const order = await paypalService.createOrder(amount);
+    if (order && order.id) {
+      res.json({ id: order.id });
+    } else {
+      res.status(500).json({ error: 'Failed to create PayPal order', details: order });
+    }
+  } catch (err) {
+    console.error('PayPal topup create-order error:', err);
+    res.status(500).json({ error: 'Failed to create PayPal order', message: err.message });
+  }
+});
+
+// E-Wallet Top-up PayPal: Capture Order
+app.post('/api/paypal/topup/capture-order', checkAuthenticated, async (req, res) => {
+  try {
+    const { orderID } = req.body;
+    const sessionUser = req.session && req.session.user;
+    const topupData = req.session.topupData;
+
+    if (!topupData) {
+      return res.status(400).json({ error: 'No top-up data in session' });
+    }
+
+    const capture = await paypalService.captureOrder(orderID);
+    console.log('PayPal topup capture response:', capture);
+
+    if (capture.status === 'COMPLETED') {
+      // Add funds to e-wallet
+      const EWallet = require('./models/EWallet');
+      EWallet.addFunds(sessionUser.userId, topupData.amount, 'PayPal', orderID, (err, result) => {
+        if (err) {
+          console.error('Failed to add funds:', err);
+          return res.status(500).json({ error: 'Failed to add funds', message: err.message });
+        }
+
+        // Set success flash message
+        req.flash && req.flash('success', `Successfully topped up $${topupData.amount.toFixed(2)} to your e-wallet`);
+
+        // Clean up session
+        delete req.session.topupData;
+
+        return res.json({
+          success: true,
+          message: `Successfully topped up $${topupData.amount.toFixed(2)} to your e-wallet`,
+          redirectUrl: '/ewallet'
+        });
+      });
+    } else {
+      return res.status(400).json({ error: 'PayPal payment not completed', status: capture.status });
+    }
+  } catch (err) {
+    console.error('PayPal topup capture-order error:', err);
+    res.status(500).json({ error: 'Failed to capture PayPal order', message: err.message });
+  }
+});
+
+// E-Wallet Top-up via NETS QR
+app.get('/ewallet/topup/nets-qr', checkAuthenticated, (req, res) => {
+  const sessionUser = req.session && req.session.user;
+  if (!sessionUser || !sessionUser.userId) return res.redirect('/login');
+
+  const topupData = req.session.topupData;
+  if (!topupData) {
+    req.flash && req.flash('error', 'Invalid top-up request');
+    return res.redirect('/ewallet/topup');
+  }
+
+  const User = require('./models/User');
+  User.getById(sessionUser.userId, (userErr, user) => {
+    return res.render('topupNetsQr', {
+      user: user || sessionUser,
+      amount: topupData.amount,
+      paymentMethod: topupData.paymentMethod
+    });
+  });
+});
+
+// E-Wallet Top-up: Set Session Data (for inline modal payments)
+app.post('/ewallet/topup/set-session', checkAuthenticated, (req, res) => {
+  const sessionUser = req.session && req.session.user;
+  if (!sessionUser || !sessionUser.userId) {
+    return res.status(401).json({ success: false, error: 'Not authenticated' });
+  }
+
+  const { amount, paymentMethod } = req.body;
+  
+  if (!amount || amount <= 0) {
+    return res.status(400).json({ success: false, error: 'Invalid amount' });
+  }
+
+  // Store topup data in session
+  req.session.topupData = {
+    userId: sessionUser.userId,
+    amount: parseFloat(amount),
+    paymentMethod: paymentMethod,
+    timestamp: new Date()
+  };
+
+  // Save session
+  req.session.save((err) => {
+    if (err) {
+      console.error('Session save error:', err);
+      return res.status(500).json({ success: false, error: 'Session error' });
+    }
+    return res.json({ success: true });
+  });
+});
+
+// E-Wallet Top-up NETS QR: API Endpoint for QR Code Generation
+app.post('/api/nets/topup/qr-code', checkAuthenticated, async (req, res) => {
+  const sessionUser = req.session && req.session.user;
+  if (!sessionUser || !sessionUser.userId) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  const topupData = req.session.topupData;
+  if (!topupData) {
+    return res.status(400).json({ error: 'No top-up data in session' });
+  }
+
+  const amount = topupData.amount;
+
+  try {
+    // Create temporary checkout data for NETS QR
+    req.session.topupNetsData = {
+      userId: sessionUser.userId,
+      amount: amount,
+      paymentMethod: 'NETS QR'
+    };
+
+    // Call NETS service to generate QR code
+    const requestBody = {
+      txn_id: "sandbox_nets|m|8ff8e5b6-d43e-4786-8ac5-7accf8c5bd9b",
+      amt_in_dollars: amount,
+      notify_mobile: 0,
+    };
+
+    const baseUrl = process.env.NETS_BASE_URL || 'https://sandbox.nets.openapipaas.com';
+    const response = await axios.post(
+      `${baseUrl}/api/v1/common/payments/nets-qr/request`,
+      requestBody,
+      {
+        headers: {
+          "api-key": process.env.API_KEY,
+          "project-id": process.env.PROJECT_ID,
+        },
+      }
+    );
+
+    const qrData = response.data.result.data;
+    console.log('QR code generation for top-up:', { qrData });
+
+    if (qrData.response_code === "00" && qrData.txn_status === 1 && qrData.qr_code) {
+      const txnRetrievalRef = qrData.txn_retrieval_ref;
+      
+      // Store transaction ref in session
+      req.session.netsTopupTxnRef = txnRetrievalRef;
+      req.session.save();
+
+      return res.json({
+        success: true,
+        qrCode: qrData.qr_code,
+        txnRetrievalRef: txnRetrievalRef,
+        timer: 300,
+        responseCode: qrData.response_code
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: qrData.error_message || 'Failed to generate QR code'
+      });
+    }
+  } catch (error) {
+    console.error('Error generating NETS QR code for top-up:', error.message);
+    return res.status(500).json({
+      success: false,
+      error: 'Failed to generate QR code: ' + error.message
+    });
+  }
+});
+
+// E-Wallet Top-up NETS QR: Check Payment Status
+app.post('/api/nets/topup/check-payment', checkAuthenticated, async (req, res) => {
+  const sessionUser = req.session && req.session.user;
+  if (!sessionUser || !sessionUser.userId) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+
+  const { txnRetrievalRef } = req.body;
+  
+  try {
+    // Check payment status with NETS API
+    const baseUrl = process.env.NETS_BASE_URL || 'https://sandbox.nets.openapipaas.com';
+    const response = await axios.post(
+      `${baseUrl}/api/v1/common/payments/nets-qr/query`,
+      { txn_retrieval_ref: txnRetrievalRef },
+      {
+        headers: {
+          "api-key": process.env.API_KEY,
+          "project-id": process.env.PROJECT_ID,
+        },
+      }
+    );
+
+    const queryData = response.data.result.data;
+    console.log('=== FULL NETS QUERY RESPONSE ===');
+    console.log(JSON.stringify(queryData, null, 2));
+    console.log('================================');
+
+    // Check if payment is completed
+    // For NETS sandbox: The simulator may show "success" but the query API doesn't update status
+    // We need to check if response_code is "00" which indicates successful transaction
+    const hasAmount = queryData.captured_amount > 0 || 
+                     queryData.amount_in_cents > 0 || 
+                     queryData.amt_in_dollars > 0 ||
+                     queryData.amount > 0;
+    
+    // More lenient check for sandbox environment
+    // Accept response_code "00" as success indicator even if status is still 1
+    const isCompleted = queryData.txn_status === 4 || 
+                       queryData.txn_status === 2 ||
+                       queryData.response_code === "00";
+
+    console.log('Payment completion check:', { 
+      txnStatus: queryData.txn_status,
+      responseCode: queryData.response_code,
+      capturedAmount: queryData.captured_amount,
+      amountInCents: queryData.amount_in_cents,
+      amtInDollars: queryData.amt_in_dollars,
+      networkStatus: queryData.network_status,
+      hasAmount: hasAmount,
+      isCompleted: isCompleted
+    });
+
+    return res.json({
+      success: true,
+      completed: isCompleted,
+      status: queryData.txn_status,
+      responseCode: queryData.response_code,
+      amount: queryData.captured_amount || queryData.amount_in_cents
+    });
+  } catch (error) {
+    console.error('Error checking payment status:', error.message);
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// E-Wallet Top-up NETS QR: Generate QR Code (old form submission method - kept for backward compatibility)
+
+app.post('/nets-qr/topup/generate', checkAuthenticated, (req, res) => {
+  const sessionUser = req.session && req.session.user;
+  if (!sessionUser || !sessionUser.userId) return res.redirect('/login');
+
+  const topupData = req.session.topupData;
+  if (!topupData) {
+    return res.status(400).json({ error: 'No top-up data in session' });
+  }
+
+  // Create a temporary checkout data for NETS QR
+  req.session.topupNetsData = {
+    userId: sessionUser.userId,
+    amount: topupData.amount,
+    paymentMethod: 'NETS QR'
+  };
+
+  netsService.generateQrCode(req, res);
+});
+
+// E-Wallet Top-up NETS QR: Success
+app.get('/nets-qr/topup/success', checkAuthenticated, (req, res) => {
+  const sessionUser = req.session && req.session.user;
+  if (!sessionUser || !sessionUser.userId) return res.redirect('/login');
+
+  const topupData = req.session.topupData;
+  if (!topupData) {
+    req.flash && req.flash('error', 'Invalid session. Please try top-up again.');
+    return res.redirect('/ewallet/topup');
+  }
+
+  const EWallet = require('./models/EWallet');
+  const txnRef = req.query.txn_retrieval_ref || `TOPUP-${Date.now()}`;
+
+  // Add funds to e-wallet
+  EWallet.addFunds(sessionUser.userId, topupData.amount, 'NETS QR', txnRef, (err, result) => {
+    if (err) {
+      console.error('Failed to add funds via NETS QR:', err);
+      req.flash && req.flash('error', 'Failed to process top-up');
+      return res.redirect('/ewallet/topup');
+    }
+
+    // Clean up session
+    delete req.session.topupData;
+    delete req.session.topupNetsData;
+
+    req.flash && req.flash('success', `Successfully topped up $${topupData.amount.toFixed(2)} to your e-wallet via NETS QR`);
+    return res.redirect('/ewallet');
+  });
+});
+
+// E-Wallet Top-up NETS QR: Failure
+app.get('/nets-qr/topup/fail', checkAuthenticated, (req, res) => {
+  // Clean up session
+  delete req.session.topupData;
+  delete req.session.topupNetsData;
+
+  res.render('netsTxnFailStatus', {
+    errorMsg: 'Your NETS QR top-up could not be processed.',
+    responseCode: 'NETS_QR_TOPUP_FAILED',
+    backUrl: '/ewallet/topup'
+  });
+});
+
+// ==================== Checkout Payment Routes (E-Wallet & NETS QR) ====================
+
+// Checkout: Generate NETS QR Code
+app.post('/api/nets/checkout/qr-code', checkAuthenticated, async (req, res) => {
+  const sessionUser = req.session && req.session.user;
+  if (!sessionUser || !sessionUser.userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+  const { amount } = req.body;
+  if (!amount || amount <= 0) {
+    return res.status(400).json({ success: false, error: 'Invalid amount' });
+  }
+
+  try {
+    const requestBody = {
+      txn_id: "sandbox_nets|m|8ff8e5b6-d43e-4786-8ac5-7accf8c5bd9b",
+      amt_in_dollars: amount,
+      notify_mobile: 0,
+    };
+
+    const baseUrl = process.env.NETS_BASE_URL || 'https://sandbox.nets.openapipaas.com';
+    const response = await require('axios').post(
+      `${baseUrl}/api/v1/common/payments/nets-qr/request`,
+      requestBody,
+      {
+        headers: {
+          "api-key": process.env.API_KEY,
+          "project-id": process.env.PROJECT_ID,
+        },
+      }
+    );
+
+    const qrData = response.data.result.data;
+    
+    if (qrData.response_code === "00" && qrData.txn_status === 1 && qrData.qr_code) {
+      const txnRetrievalRef = qrData.txn_retrieval_ref;
+      
+      // Store the transaction reference in session for later verification
+      req.session.checkoutNetsQrRef = txnRetrievalRef;
+      req.session.save();
+
+      return res.json({
+        success: true,
+        qrCode: qrData.qr_code,
+        txnRetrievalRef: txnRetrievalRef,
+        amount: amount
+      });
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: qrData.error_message || 'Failed to generate QR code'
+      });
+    }
+  } catch (error) {
+    console.error('Error generating checkout NETS QR:', error.message);
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Checkout: Check NETS QR Payment Status
+app.post('/api/nets/checkout/check-payment', checkAuthenticated, async (req, res) => {
+  const sessionUser = req.session && req.session.user;
+  if (!sessionUser || !sessionUser.userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+  const { txnRetrievalRef } = req.body;
+  if (!txnRetrievalRef) {
+    return res.status(400).json({ success: false, error: 'Missing transaction reference' });
+  }
+
+  try {
+    const baseUrl = process.env.NETS_BASE_URL || 'https://sandbox.nets.openapipaas.com';
+    const response = await require('axios').post(
+      `${baseUrl}/api/v1/common/payments/nets-qr/query`,
+      { txn_retrieval_ref: txnRetrievalRef },
+      {
+        headers: {
+          "api-key": process.env.API_KEY,
+          "project-id": process.env.PROJECT_ID,
+        },
+      }
+    );
+
+    const queryData = response.data.result.data;
+    
+    // Check if payment is completed
+    const isCompleted = queryData.response_code === "00" && 
+                       (queryData.txn_status === 4 || queryData.txn_status === 3);
+
+    return res.json({
+      success: true,
+      completed: isCompleted,
+      status: queryData.txn_status,
+      responseCode: queryData.response_code
+    });
+  } catch (error) {
+    console.error('Error checking checkout NETS payment status:', error.message);
+    return res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Checkout: Complete E-Wallet Payment
+app.post('/checkout/confirm-ewallet', checkAuthenticated, (req, res) => {
+  const sessionUser = req.session && req.session.user;
+  if (!sessionUser || !sessionUser.userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+  const checkoutData = req.session.checkoutData;
+  if (!checkoutData) {
+    return res.status(400).json({ success: false, error: 'No checkout data found' });
+  }
+
+  const { items, subtotal, tax, shipping, total, appliedVoucher, voucherDiscount, storeCreditUsed, ewalletUsed, paymentMethod } = checkoutData;
+
+  // Record purchase
+  const summary = {
+    subtotal,
+    tax,
+    shipping,
+    total: total,
+    paymentMethod: paymentMethod,
+    paymentDetails: 'E-Wallet payment completed'
+  };
+
+  const Purchase = require('./models/Purchase');
+  Purchase.record(sessionUser.userId, summary, items, (saveErr, purchaseId) => {
+    if (saveErr) {
+      console.error('Failed to record purchase:', saveErr);
+      return res.status(500).json({ success: false, error: 'Failed to process payment' });
+    }
+
+    const finalOrderId = purchaseId;
+
+    // Deduct store credit
+    if (storeCreditUsed > 0) {
+      const deductSql = 'UPDATE users SET store_credit = GREATEST(0, store_credit - ?) WHERE userId = ?';
+      require('./db').query(deductSql, [storeCreditUsed, sessionUser.userId], (creditErr) => {
+        if (creditErr) console.error('Failed to deduct store credit:', creditErr);
+      });
+    }
+
+    // Deduct e-wallet
+    if (ewalletUsed > 0) {
+      const EWallet = require('./models/EWallet');
+      EWallet.deductFunds(sessionUser.userId, ewalletUsed, `E-wallet payment for Order #${finalOrderId}`, (ewErr) => {
+        if (ewErr) console.error('Failed to deduct e-wallet:', ewErr);
+      });
+    }
+
+    // Award points
+    if (subtotal > 0) {
+      const pointsEarned = Math.floor(total * 10);
+      const EWallet = require('./models/EWallet');
+      EWallet.addPoints(sessionUser.userId, pointsEarned, `Points earned from Order #${finalOrderId}`, finalOrderId, (pointsErr) => {
+        if (pointsErr) console.error('Failed to add points:', pointsErr);
+      });
+    }
+
+    // Mark voucher as used
+    if (appliedVoucher && voucherDiscount > 0 && appliedVoucher.userVoucherId) {
+      const Voucher = require('./models/Voucher');
+      Voucher.markUsed(appliedVoucher.userVoucherId, (vErr) => {
+        if (vErr) console.error('Failed to mark voucher used:', vErr);
+      });
+    }
+    delete req.session.appliedVoucher;
+
+    // Clear cart
+    const CartItem = require('./models/CartItem');
+    CartItem.clear(sessionUser.userId, (clearErr) => {
+      if (clearErr) console.error('Failed to clear cart:', clearErr);
+    });
+
+    // Clean up session
+    delete req.session.checkoutData;
+
+    // Get updated user data
+    const User = require('./models/User');
+    User.getById(sessionUser.userId, (userErr, updatedUser) => {
+      const pointsEarned = Math.floor(total * 10);
+      
+      return res.json({
+        success: true,
+        orderId: finalOrderId,
+        redirect: '/purchases'
+      });
+    });
+  });
+});
+
+// Checkout: Complete NETS QR Payment
+app.post('/checkout/confirm-nets-qr', checkAuthenticated, (req, res) => {
+  const sessionUser = req.session && req.session.user;
+  if (!sessionUser || !sessionUser.userId) return res.status(401).json({ success: false, error: 'Not authenticated' });
+
+  const checkoutData = req.session.checkoutData;
+  if (!checkoutData) {
+    return res.status(400).json({ success: false, error: 'No checkout data found' });
+  }
+
+  const { items, subtotal, tax, shipping, total, appliedVoucher, voucherDiscount, storeCreditUsed, ewalletUsed, paymentMethod } = checkoutData;
+
+  // Record purchase
+  const summary = {
+    subtotal,
+    tax,
+    shipping,
+    total: total,
+    paymentMethod: paymentMethod,
+    paymentDetails: 'NETS QR payment completed'
+  };
+
+  const Purchase = require('./models/Purchase');
+  Purchase.record(sessionUser.userId, summary, items, (saveErr, purchaseId) => {
+    if (saveErr) {
+      console.error('Failed to record purchase:', saveErr);
+      return res.status(500).json({ success: false, error: 'Failed to process payment' });
+    }
+
+    const finalOrderId = purchaseId;
+
+    // Deduct store credit
+    if (storeCreditUsed > 0) {
+      const deductSql = 'UPDATE users SET store_credit = GREATEST(0, store_credit - ?) WHERE userId = ?';
+      require('./db').query(deductSql, [storeCreditUsed, sessionUser.userId], (creditErr) => {
+        if (creditErr) console.error('Failed to deduct store credit:', creditErr);
+      });
+    }
+
+    // Deduct e-wallet
+    if (ewalletUsed > 0) {
+      const EWallet = require('./models/EWallet');
+      EWallet.deductFunds(sessionUser.userId, ewalletUsed, `E-wallet payment for Order #${finalOrderId}`, (ewErr) => {
+        if (ewErr) console.error('Failed to deduct e-wallet:', ewErr);
+      });
+    }
+
+    // Award points
+    if (subtotal > 0) {
+      const pointsEarned = Math.floor(total * 10);
+      const EWallet = require('./models/EWallet');
+      EWallet.addPoints(sessionUser.userId, pointsEarned, `Points earned from Order #${finalOrderId}`, finalOrderId, (pointsErr) => {
+        if (pointsErr) console.error('Failed to add points:', pointsErr);
+      });
+    }
+
+    // Mark voucher as used
+    if (appliedVoucher && voucherDiscount > 0 && appliedVoucher.userVoucherId) {
+      const Voucher = require('./models/Voucher');
+      Voucher.markUsed(appliedVoucher.userVoucherId, (vErr) => {
+        if (vErr) console.error('Failed to mark voucher used:', vErr);
+      });
+    }
+    delete req.session.appliedVoucher;
+
+    // Clear cart
+    const CartItem = require('./models/CartItem');
+    CartItem.clear(sessionUser.userId, (clearErr) => {
+      if (clearErr) console.error('Failed to clear cart:', clearErr);
+    });
+
+    // Clean up session
+    delete req.session.checkoutData;
+    delete req.session.checkoutNetsQrRef;
+
+    // Get updated user data
+    const User = require('./models/User');
+    User.getById(sessionUser.userId, (userErr, updatedUser) => {
+      const pointsEarned = Math.floor(total * 10);
+      
+      return res.json({
+        success: true,
+        orderId: finalOrderId,
+        redirect: '/purchases'
+      });
+    });
+  });
 });
 
 // ==================== End E-Wallet Routes ====================

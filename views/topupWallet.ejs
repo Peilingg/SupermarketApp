@@ -4,41 +4,145 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <% if (paypalClientId) { %>
+    <script src="https://www.paypal.com/sdk/js?client-id=<%= paypalClientId %>&currency=SGD&locale=en_SG"></script>
+  <% } %>
   <title>Top Up E-Wallet</title>
   <style>
-    body { background: #f7f8fa; }
-    .card-border { border-radius: 10px; }
-    .wallet-card {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      border-radius: 15px;
-      padding: 20px;
-      margin-bottom: 30px;
+    :root {
+      --bg: linear-gradient(135deg, #f7f9ff 0%, #eef2ff 50%, #f8fbff 100%);
+      --card: #ffffff;
+      --primary: #667eea;
+      --primary-2: #5f9bff;
+      --accent: #8e5cf6;
+      --text-muted: #6b7280;
+      --border: #e5e7eb;
+      --shadow: 0 10px 30px rgba(102, 126, 234, 0.12);
     }
-    .balance-amount { font-size: 2rem; font-weight: bold; margin: 10px 0; }
+
+    body {
+      background: var(--bg);
+      min-height: 100vh;
+    }
+
+    .card-border {
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+    }
+
+    .wallet-card {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+      color: white;
+      border-radius: 16px;
+      padding: 24px;
+      margin-bottom: 30px;
+      box-shadow: 0 15px 45px rgba(104, 117, 245, 0.25);
+    }
+
+    .balance-amount {
+      font-size: 2.4rem;
+      font-weight: 800;
+      margin: 6px 0 0;
+      letter-spacing: 0.3px;
+    }
+
+    .section-title {
+      color: #111827;
+      letter-spacing: 0.2px;
+    }
+
     .amount-preset {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
-      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      gap: 12px;
       margin-top: 20px;
     }
+
     .preset-btn {
-      padding: 10px;
-      border: 2px solid #e5e7eb;
-      background: white;
-      border-radius: 8px;
+      padding: 12px;
+      border: 2px solid var(--border);
+      background: var(--card);
+      border-radius: 10px;
       cursor: pointer;
-      transition: all 0.3s;
-      font-weight: bold;
+      transition: all 0.25s ease;
+      font-weight: 700;
+      color: #1f2937;
+      box-shadow: 0 6px 18px rgba(0, 0, 0, 0.04);
     }
+
     .preset-btn:hover {
-      border-color: #667eea;
+      border-color: var(--primary);
       background: #f0f4ff;
+      transform: translateY(-1px);
     }
+
     .preset-btn.active {
-      background: #667eea;
+      background: linear-gradient(135deg, var(--primary) 0%, var(--primary-2) 100%);
       color: white;
-      border-color: #667eea;
+      border-color: var(--primary);
+      box-shadow: 0 10px 25px rgba(102, 126, 234, 0.25);
+    }
+
+    .list-group-item {
+      border: 1px solid var(--border) !important;
+      border-radius: 10px !important;
+      margin-bottom: 10px;
+      transition: all 0.2s ease;
+    }
+
+    .list-group-item:hover {
+      border-color: var(--primary);
+      background: #f6f7ff;
+      box-shadow: 0 8px 20px rgba(102, 126, 234, 0.12);
+    }
+
+    .list-group-item input:checked + div {
+      color: #111827;
+    }
+
+    .list-group-item input:checked + div .fw-semibold {
+      color: var(--primary);
+    }
+
+    .card-header.bg-light {
+      background: linear-gradient(90deg, #f3f6ff 0%, #eef2ff 100%) !important;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .summary-accent {
+      background: linear-gradient(135deg, #f9fbff 0%, #eef4ff 100%);
+      border: 1px solid #e0e7ff;
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary) 0%, var(--accent) 100%);
+      border: none;
+      box-shadow: 0 10px 25px rgba(102, 126, 234, 0.35);
+    }
+
+    .btn-primary:hover {
+      filter: brightness(1.05);
+      transform: translateY(-1px);
+    }
+
+    .btn-outline-secondary {
+      border-color: var(--border);
+      color: #374151;
+    }
+
+    .btn-outline-secondary:hover {
+      border-color: var(--primary);
+      color: var(--primary);
+      background: #eef2ff;
+    }
+
+    .alert-info {
+      background: #eef8ff;
+      border-color: #d6e9ff;
+      color: #0f4c81;
     }
   </style>
 </head>
@@ -47,7 +151,7 @@
 
   <div class="container my-4">
     <div class="d-flex justify-content-between align-items-center mb-4">
-      <h2>Top Up E-Wallet</h2>
+      <h2 class="section-title">Top Up E-Wallet</h2>
       <a href="/ewallet" class="btn btn-outline-secondary">Back to Wallet</a>
     </div>
 
@@ -101,23 +205,62 @@
                       <input class="form-check-input me-3 payment-choice" type="radio" name="paymentMethod" value="<%= method %>" <%= method === 'Credit/Debit card' ? 'checked' : '' %>>
                       <div>
                         <div class="fw-semibold"><%= method %></div>
-                        <% if (method === 'E-Wallet') { %>
-                          <small class="text-muted">Pay with your e-wallet balance</small>
-                        <% } else if (method === 'PayPal') { %>
+                        <% if (method === 'PayPal') { %>
                           <small class="text-muted">Secure PayPal checkout</small>
-                        <% } else if (method === 'Contactless payment (Apple Pay)') { %>
-                          <small class="text-muted">Pay with your linked device</small>
+                        <% } else if (method === 'NETS QR') { %>
+                          <small class="text-muted">Scan to pay with NETS QR</small>
                         <% } else { %>
                           <small class="text-muted">Visa / Mastercard / AMEX</small>
                         <% } %>
                       </div>
                     </label>
+                    
+                    <!-- Credit/Debit Card Details Section -->
+                    <% if (method === 'Credit/Debit card') { %>
+                      <div id="topup-card-details-section" class="list-group-item" style="display: none; padding: 0; border: none; background: transparent;">
+                        <div class="card bg-light border ms-4 me-2 mb-2">
+                          <div class="card-body">
+                            <h6 class="card-title">Card Details</h6>
+                            
+                            <div class="mb-2">
+                              <label for="topupCardholderName" class="form-label small">Cardholder Name</label>
+                              <input type="text" class="form-control form-control-sm" id="topupCardholderName" name="cardholderName" form="topupForm" placeholder="John Doe">
+                            </div>
+
+                            <div class="mb-2">
+                              <label for="topupCardNumber" class="form-label small">Card Number</label>
+                              <input type="text" class="form-control form-control-sm" id="topupCardNumber" name="cardNumber" form="topupForm" placeholder="1234 5678 9012 3456" maxlength="19">
+                              <small class="text-muted">16 digits</small>
+                            </div>
+
+                            <div class="row">
+                              <div class="col-6">
+                                <label for="topupExpiryDate" class="form-label small">Expiry Date</label>
+                                <input type="text" class="form-control form-control-sm" id="topupExpiryDate" name="expiryDate" form="topupForm" placeholder="MM/YY" maxlength="5">
+                              </div>
+                              <div class="col-6">
+                                <label for="topupCvv" class="form-label small">CVV</label>
+                                <input type="password" class="form-control form-control-sm" id="topupCvv" name="cvv" form="topupForm" placeholder="123" maxlength="4">
+                                <small class="text-muted">3-4 digits</small>
+                              </div>
+                            </div>
+
+                            <div class="form-check mt-2">
+                              <input class="form-check-input" type="checkbox" id="topupSaveCard" name="saveCard" form="topupForm">
+                              <label class="form-check-label" for="topupSaveCard">
+                                <small>Save this card for future purchases</small>
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    <% } %>
                   <% }); %>
                 </div>
               </div>
 
               <!-- Summary -->
-              <div class="card bg-light mb-4">
+              <div class="card summary-accent mb-4">
                 <div class="card-body">
                   <div class="d-flex justify-content-between mb-2">
                     <span>Top-Up Amount:</span>
@@ -134,9 +277,52 @@
                 </div>
               </div>
 
-              <button type="submit" class="btn btn-success btn-lg w-100">Proceed to Payment</button>
+              <button type="submit" class="btn btn-primary btn-lg w-100">Proceed to Payment</button>
               <a href="/ewallet" class="btn btn-outline-secondary w-100 mt-2">Cancel</a>
             </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- PayPal Modal -->
+      <div class="modal fade" id="paypalModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">Complete Payment with PayPal</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <div id="paypal-button-container"></div>
+              <div id="paypal-loading" style="display: none; text-align: center; padding: 20px;">
+                <div class="spinner-border text-primary" role="status">
+                  <span class="visually-hidden">Processing...</span>
+                </div>
+                <p class="mt-2">Processing payment...</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- NETS QR Modal -->
+      <div class="modal fade" id="netsqrModal" tabindex="-1" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">Complete Payment with NETS QR</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <div id="netsqr-container">
+                <div style="text-align: center; padding: 40px;">
+                  <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Generating QR code...</span>
+                  </div>
+                  <p class="mt-3">Generating QR code...</p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -197,9 +383,10 @@
 
     topupAmountInput.addEventListener('input', updateSummary);
 
-    // Form validation
+    // Form validation and submission
     document.getElementById('topupForm').addEventListener('submit', function(e) {
       const amount = parseFloat(topupAmountInput.value);
+      const paymentMethod = document.querySelector('input[name="paymentMethod"]:checked')?.value;
       
       if (!amount || amount < 10) {
         e.preventDefault();
@@ -212,6 +399,386 @@
         alert('Maximum top-up amount is $10,000');
         return false;
       }
+
+      // If PayPal is selected, handle it specially
+      if (paymentMethod === 'PayPal') {
+        e.preventDefault();
+        showPayPalModal(amount);
+        return false;
+      }
+
+      // If NETS QR is selected, handle it specially
+      if (paymentMethod === 'NETS QR') {
+        e.preventDefault();
+        showNetsQrModal(amount);
+        return false;
+      }
+
+      // Validate credit/debit card fields if selected
+      if (paymentMethod === 'Credit/Debit card') {
+        const cardholderName = document.getElementById('topupCardholderName')?.value?.trim();
+        const cardNumber = document.getElementById('topupCardNumber')?.value?.replace(/\s/g, '');
+        const expiryDate = document.getElementById('topupExpiryDate')?.value;
+        const cvv = document.getElementById('topupCvv')?.value;
+
+        if (!cardholderName) {
+          e.preventDefault();
+          alert('Cardholder name is required');
+          return false;
+        }
+
+        if (!cardNumber || !/^\d{16}$/.test(cardNumber)) {
+          e.preventDefault();
+          alert('Card number must be 16 digits');
+          return false;
+        }
+
+        if (!expiryDate || !/^\d{2}\/\d{2}$/.test(expiryDate)) {
+          e.preventDefault();
+          alert('Expiry date must be in MM/YY format');
+          return false;
+        }
+
+        if (!cvv || !/^\d{3,4}$/.test(cvv)) {
+          e.preventDefault();
+          alert('CVV must be 3-4 digits');
+          return false;
+        }
+      }
+    });
+
+    // PayPal Modal Handler
+    let paypalModal;
+    function showPayPalModal(amount) {
+      if (!paypalModal) {
+        paypalModal = new bootstrap.Modal(document.getElementById('paypalModal'));
+      }
+      
+      // Check if PayPal SDK is available
+      if (typeof paypal === 'undefined') {
+        alert('PayPal is not available. Please refresh the page and try again, or use another payment method.');
+        return;
+      }
+      
+      // Clear previous button
+      document.getElementById('paypal-button-container').innerHTML = '';
+      
+      // Store topup data in session via API before creating PayPal order
+      fetch('/ewallet/topup/set-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          amount: amount,
+          paymentMethod: 'PayPal'
+        })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.success) {
+          createPayPalOrder(amount);
+          paypalModal.show();
+        } else {
+          alert('Failed to initialize PayPal: ' + (data.error || 'Unknown error'));
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to initialize PayPal: ' + error.message);
+      });
+    }
+
+    function createPayPalOrder(amount) {
+      // First check if PayPal SDK is available
+      const checkPayPal = setInterval(() => {
+        if (typeof paypal !== 'undefined') {
+          clearInterval(checkPayPal);
+          proceedWithPayPalOrder(amount);
+        }
+      }, 100);
+
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        clearInterval(checkPayPal);
+        if (typeof paypal === 'undefined') {
+          alert('PayPal SDK failed to load. Please check your internet connection and try again.');
+        }
+      }, 5000);
+    }
+
+    function proceedWithPayPalOrder(amount) {
+      fetch('/api/paypal/topup/create-order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: amount.toString() })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.id) {
+          renderPayPalButton(data.id, amount);
+        } else {
+          alert('Failed to create PayPal order: ' + (data.error || 'Unknown error'));
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to create PayPal order: ' + error.message);
+      });
+    }
+
+    function renderPayPalButton(orderID, amount) {
+      // Check if PayPal SDK is loaded
+      if (typeof paypal === 'undefined') {
+        console.error('PayPal SDK not loaded yet');
+        alert('PayPal is not initialized. Please try again.');
+        return;
+      }
+
+      try {
+        paypal.Buttons({
+          createOrder: (data, actions) => {
+            return orderID;
+          },
+
+          onApprove: (data, actions) => {
+            document.getElementById('paypal-loading').style.display = 'block';
+            
+            return fetch('/api/paypal/topup/capture-order', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ orderID: data.orderID })
+            })
+            .then(response => response.json())
+            .then(result => {
+              if (result.success) {
+                alert('Payment successful! Your wallet has been topped up.');
+                window.location.href = result.redirectUrl;
+              } else {
+                document.getElementById('paypal-loading').style.display = 'none';
+                alert('Payment capture failed: ' + (result.error || 'Unknown error'));
+              }
+            })
+            .catch(error => {
+              document.getElementById('paypal-loading').style.display = 'none';
+              console.error('Capture error:', error);
+              alert('Error processing payment: ' + error.message);
+            });
+          },
+
+          onError: (err) => {
+            console.error('PayPal error:', err);
+            alert('Payment error: ' + err.message);
+          }
+        }).render('#paypal-button-container');
+      } catch (error) {
+        console.error('Error rendering PayPal button:', error);
+        alert('Failed to render PayPal button: ' + error.message);
+      }
+    }
+
+    // NETS QR Modal Handler
+    let netsqrModal;
+    function showNetsQrModal(amount) {
+      if (!netsqrModal) {
+        netsqrModal = new bootstrap.Modal(document.getElementById('netsqrModal'));
+      }
+      
+      netsqrModal.show();
+      
+      // Store topup data in session via API before generating QR
+      fetch('/ewallet/topup/set-session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          amount: amount,
+          paymentMethod: 'NETS QR'
+        })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.success) {
+          generateNetsQrCode(amount);
+        } else {
+          document.getElementById('netsqr-container').innerHTML = '<div style="color: #dc3545; text-align: center;"><p>Failed to initialize: ' + (data.error || 'Unknown error') + '</p></div>';
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        document.getElementById('netsqr-container').innerHTML = '<div style="color: #dc3545; text-align: center;"><p>Failed to initialize: ' + error.message + '</p></div>';
+      });
+    }
+
+    function generateNetsQrCode(amount) {
+      fetch('/api/nets/topup/qr-code', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amount: amount })
+      })
+      .then(response => response.json())
+      .then(data => {
+        if (data.success && data.qrCode) {
+          displayNetsQrCode(data, amount);
+        } else {
+          document.getElementById('netsqr-container').innerHTML = '<div style="color: #dc3545; text-align: center;"><p>Failed to generate QR code: ' + (data.error || 'Unknown error') + '</p></div>';
+        }
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        document.getElementById('netsqr-container').innerHTML = '<div style="color: #dc3545; text-align: center;"><p>Failed to generate QR code: ' + error.message + '</p></div>';
+      });
+    }
+
+    function displayNetsQrCode(data, amount) {
+      let html = '<div style="text-align: center;">';
+      html += '<div style="display: inline-block; background: #ffc107; color: #000; padding: 8px 16px; border-radius: 20px; font-weight: bold; margin-bottom: 20px;">Time remaining: <span id="netsqr-timer">300</span>s</div><br>';
+      html += '<img src="data:image/png;base64,' + data.qrCode + '" alt="NETS QR Code" style="max-width: 300px; height: auto; margin: 20px 0;">';
+      html += '<p style="color: #666; margin-top: 20px;">Open your NETS app and scan this code to complete the payment.</p>';
+      html += '</div>';
+      
+      document.getElementById('netsqr-container').innerHTML = html;
+      
+      // Start countdown timer
+      startNetsQrTimer(300);
+      
+      // Poll for payment confirmation
+      pollNetsPaymentStatus(data.txnRetrievalRef);
+    }
+
+    function startNetsQrTimer(seconds) {
+      let remaining = seconds;
+      const timerElement = document.getElementById('netsqr-timer');
+      
+      const interval = setInterval(() => {
+        remaining--;
+        if (timerElement) {
+          timerElement.textContent = remaining;
+        }
+        
+        if (remaining <= 0) {
+          clearInterval(interval);
+          document.getElementById('netsqr-container').innerHTML = '<div style="color: #dc3545; text-align: center;"><p>⚠️ QR code expired. Please close this and try again.</p></div>';
+        }
+      }, 1000);
+    }
+
+    function pollNetsPaymentStatus(txnRetrievalRef) {
+      let pollCount = 0;
+      const maxPolls = 300; // 10 minutes with 2-second intervals (much longer timeout)
+      
+      const pollInterval = setInterval(() => {
+        pollCount++;
+        
+        fetch('/api/nets/topup/check-payment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ txnRetrievalRef: txnRetrievalRef })
+        })
+        .then(response => response.json())
+        .then(data => {
+          console.log(`Poll attempt ${pollCount}:`, data);
+          
+          // Check if payment is completed
+          if (data.success && data.completed) {
+            clearInterval(pollInterval);
+            console.log('Payment confirmed - redirecting to success page');
+            
+            // Show modal with success message
+            document.getElementById('netsqr-container').innerHTML = `
+              <div style="text-align: center; padding: 40px;">
+                <div style="font-size: 48px; margin-bottom: 20px;">✅</div>
+                <h5>Payment Successful!</h5>
+                <p style="color: #666; margin-top: 15px;">Your wallet has been topped up.</p>
+                <p style="font-size: 14px; color: #999;">Redirecting...</p>
+              </div>
+            `;
+            
+            // Wait 1.5 seconds before redirect to show confirmation
+            setTimeout(() => {
+              window.location.href = '/nets-qr/topup/success?txn_retrieval_ref=' + encodeURIComponent(txnRetrievalRef);
+            }, 1500);
+          } else if (pollCount >= maxPolls) {
+            // Stop polling after 10 minutes
+            clearInterval(pollInterval);
+            document.getElementById('netsqr-container').innerHTML = `
+              <div style="color: #dc3545; text-align: center; padding: 40px;">
+                <div style="font-size: 48px; margin-bottom: 20px;">⏱️</div>
+                <p><strong>Payment Verification Timeout</strong></p>
+                <p>The system couldn't verify your payment after 10 minutes. This might mean:</p>
+                <ul style="text-align: left; display: inline-block; margin-top: 15px;">
+                  <li>The payment is still processing</li>
+                  <li>The QR code has expired</li>
+                  <li>The payment was cancelled</li>
+                </ul>
+                <p style="margin-top: 20px;">
+                  <a href="/ewallet/topup" class="btn btn-primary">Try Again</a>
+                </p>
+              </div>
+            `;
+          }
+        })
+        .catch(error => {
+          console.error(`Poll attempt ${pollCount} error:`, error);
+        });
+      }, 2000);
+    }
+
+    // Card details toggle
+    document.addEventListener('DOMContentLoaded', function() {
+      const cardDetailsSection = document.getElementById('topup-card-details-section');
+      const radioButtons = document.querySelectorAll('.payment-choice');
+
+      // Show card details if Credit/Debit card is already checked on page load
+      const creditCardRadio = document.querySelector('input[name="paymentMethod"][value="Credit/Debit card"]');
+      if (creditCardRadio && creditCardRadio.checked) {
+        cardDetailsSection.style.display = 'block';
+      }
+
+      radioButtons.forEach(radio => {
+        radio.addEventListener('change', function() {
+          if (this.value === 'Credit/Debit card') {
+            cardDetailsSection.style.display = 'block';
+          } else {
+            cardDetailsSection.style.display = 'none';
+          }
+        });
+      });
+
+      // Format card number input
+      const cardNumberInput = document.getElementById('topupCardNumber');
+      cardNumberInput.addEventListener('input', function(e) {
+        let value = e.target.value.replace(/\s/g, '');
+        let formattedValue = '';
+        for (let i = 0; i < value.length; i++) {
+          if (i > 0 && i % 4 === 0) formattedValue += ' ';
+          formattedValue += value[i];
+        }
+        e.target.value = formattedValue;
+      });
+
+      // Format expiry date input
+      const expiryInput = document.getElementById('topupExpiryDate');
+      expiryInput.addEventListener('input', function(e) {
+        let value = e.target.value.replace(/\D/g, '');
+        if (value.length >= 2) {
+          value = value.substring(0, 2) + '/' + value.substring(2, 4);
+        }
+        e.target.value = value;
+      });
+
+      // Format CVV input
+      const cvvInput = document.getElementById('topupCvv');
+      cvvInput.addEventListener('input', function(e) {
+        e.target.value = e.target.value.replace(/\D/g, '').substring(0, 4);
+      });
+
+      // Validate cardholder name
+      const cardholderInput = document.getElementById('topupCardholderName');
+      cardholderInput.addEventListener('blur', function() {
+        if (!this.value.trim()) {
+          this.classList.add('is-invalid');
+        } else {
+          this.classList.remove('is-invalid');
+        }
+      });
     });
   </script>
 

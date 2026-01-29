@@ -35,21 +35,28 @@ const VoucherController = {
     const sessionUser = req.session && req.session.user;
     if (!sessionUser || !sessionUser.userId) return res.redirect('/login');
 
-    Voucher.listClaimableForUser(sessionUser.userId, (err, available) => {
-      if (err) {
-        console.error('Voucher.listClaimableForUser', err);
-        req.flash && req.flash('error', 'Unable to load vouchers.');
-      }
-      Voucher.listUserVouchers(sessionUser.userId, (uErr, mine) => {
-        if (uErr) {
-          console.error('Voucher.listUserVouchers', uErr);
-          req.flash && req.flash('error', 'Unable to load your vouchers.');
+    // Get cart item count to show/hide checkout button
+    const CartItem = require('../models/CartItem');
+    CartItem.listAll(sessionUser.userId, (cartErr, cartItems) => {
+      const cartItemCount = cartItems ? cartItems.length : 0;
+
+      Voucher.listClaimableForUser(sessionUser.userId, (err, available) => {
+        if (err) {
+          console.error('Voucher.listClaimableForUser', err);
+          req.flash && req.flash('error', 'Unable to load vouchers.');
         }
-        return res.render('vouchers', {
-          available: available || [],
-          myVouchers: mine || [],
-          applied: req.session.appliedVoucher || null,
-          user: sessionUser
+        Voucher.listUserVouchers(sessionUser.userId, (uErr, mine) => {
+          if (uErr) {
+            console.error('Voucher.listUserVouchers', uErr);
+            req.flash && req.flash('error', 'Unable to load your vouchers.');
+          }
+          return res.render('vouchers', {
+            available: available || [],
+            myVouchers: mine || [],
+            applied: req.session.appliedVoucher || null,
+            user: sessionUser,
+            cartItemCount: cartItemCount
+          });
         });
       });
     });
@@ -76,7 +83,7 @@ const VoucherController = {
   apply: function(req, res) {
     const sessionUser = req.session && req.session.user;
     if (!sessionUser || !sessionUser.userId) return res.redirect('/login');
-    const code = (req.body.code || '').trim();
+    const code = (req.body && req.body.code ? req.body.code : '').trim();
     if (!code) {
       req.flash && req.flash('error', 'Enter a voucher code to apply.');
       return res.redirect('/vouchers');
@@ -91,29 +98,80 @@ const VoucherController = {
         req.flash && req.flash('error', 'Voucher already used.');
         return res.redirect('/vouchers');
       }
-      // store minimal info in session for checkout use
-      req.session.appliedVoucher = {
-        userVoucherId: userVoucher.userVoucherId,
-        voucherId: userVoucher.voucherId,
-        code: userVoucher.code,
-        description: userVoucher.description,
-        discountType: userVoucher.discountType,
-        discountValue: userVoucher.discountValue,
-        minSpend: userVoucher.minSpend,
-        startDate: userVoucher.startDate,
-        endDate: userVoucher.endDate,
-        isActive: userVoucher.isActive
-      };
-      req.flash && req.flash('success', 'Voucher applied. It will be used at checkout if eligible.');
-      return res.redirect('/checkout');
+
+      // Validate voucher against current cart
+      const CartItem = require('../models/CartItem');
+      CartItem.listAll(sessionUser.userId, (cartErr, items) => {
+        if (cartErr || !items || items.length === 0) {
+          req.flash && req.flash('error', 'Your cart is empty. Add items before applying a voucher.');
+          return res.redirect('/vouchers');
+        }
+
+        // Calculate cart totals
+        const mapped = items.map(it => {
+          const price = Number(it.price || it.unitPrice || 0);
+          const qty = Number(it.quantity || it.qty || 0);
+          return { price, quantity: qty, lineTotal: price * qty };
+        });
+        const subtotal = mapped.reduce((s, i) => s + i.lineTotal, 0);
+        const tax = subtotal * 0.07;
+        const shipping = subtotal > 50 ? 0 : 5;
+        const preVoucherTotal = subtotal + tax + shipping;
+
+        // Calculate voucher discount
+        const discountCalc = computeDiscount(userVoucher, subtotal);
+        const voucherDiscount = discountCalc.discount || 0;
+
+        // Check if voucher value is greater than or equal to pre-voucher total
+        if (voucherDiscount >= preVoucherTotal) {
+          req.flash && req.flash('error', 
+            `Unable to use this voucher. The voucher value ($${voucherDiscount.toFixed(2)}) is greater than or equal to your order total ($${preVoucherTotal.toFixed(2)}). Please add more items to your cart or choose a different voucher.`
+          );
+          return res.redirect('/checkout');
+        }
+
+        // Check if voucher can be applied (minimum spend, etc.)
+        if (discountCalc.reason) {
+          req.flash && req.flash('error', `Unable to apply voucher: ${discountCalc.reason}`);
+          return res.redirect('/checkout');
+        }
+
+        // store minimal info in session for checkout use
+        req.session.appliedVoucher = {
+          userVoucherId: userVoucher.userVoucherId,
+          voucherId: userVoucher.voucherId,
+          code: userVoucher.code,
+          description: userVoucher.description,
+          discountType: userVoucher.discountType,
+          discountValue: userVoucher.discountValue,
+          minSpend: userVoucher.minSpend,
+          startDate: userVoucher.startDate,
+          endDate: userVoucher.endDate,
+          isActive: userVoucher.isActive
+        };
+        
+        // Explicitly save session before redirecting to ensure it persists
+        req.session.save((saveErr) => {
+          if (saveErr) {
+            console.error('Failed to save session:', saveErr);
+          }
+          req.flash && req.flash('success', 'Voucher applied. It will be used at checkout if eligible.');
+          return res.redirect('/checkout');
+        });
+      });
     });
   },
 
   // User: clear applied voucher
   clearApplied: function(req, res) {
     delete req.session.appliedVoucher;
-    req.flash && req.flash('success', 'Voucher removed.');
-    return res.redirect('/checkout');
+    req.session.save((saveErr) => {
+      if (saveErr) {
+        console.error('Failed to save session:', saveErr);
+      }
+      req.flash && req.flash('success', 'Voucher removed.');
+      return res.redirect('/checkout');
+    });
   },
 
   // Admin: list/manage
@@ -135,8 +193,8 @@ const VoucherController = {
       discountType: req.body.discountType,
       discountValue: req.body.discountValue,
       minSpend: req.body.minSpend,
-      startDate: req.body.startDate || null,
-      endDate: req.body.endDate || null,
+      startDate: req.body.startDate ? new Date(req.body.startDate).toISOString().slice(0, 19).replace('T', ' ') : null,
+      endDate: req.body.endDate ? new Date(req.body.endDate).toISOString().slice(0, 19).replace('T', ' ') : null,
       isActive: req.body.isActive === 'on' || req.body.isActive === '1' || req.body.isActive === 1
     };
     Voucher.create(payload, (err) => {
@@ -159,8 +217,8 @@ const VoucherController = {
       discountType: req.body.discountType,
       discountValue: req.body.discountValue,
       minSpend: req.body.minSpend,
-      startDate: req.body.startDate || null,
-      endDate: req.body.endDate || null,
+      startDate: req.body.startDate ? new Date(req.body.startDate).toISOString().slice(0, 19).replace('T', ' ') : null,
+      endDate: req.body.endDate ? new Date(req.body.endDate).toISOString().slice(0, 19).replace('T', ' ') : null,
       isActive: req.body.isActive === 'on' || req.body.isActive === '1' || req.body.isActive === 1
     };
     Voucher.update(id, payload, (err) => {

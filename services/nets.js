@@ -1,18 +1,22 @@
 const axios = require("axios");
 
 exports.generateQrCode = async (req, res) => {
-  const { cartTotal } = req.body;
+  const { cartTotal, amount } = req.body;
   const sessionUser = req.session && req.session.user;
   
   if (!sessionUser || !sessionUser.userId) {
     return res.redirect('/login');
   }
 
-  console.log('Generating QR Code for amount:', cartTotal);
+  // Support both checkout (cartTotal) and top-up (amount) flows
+  const paymentAmount = cartTotal || amount;
+  const isTopup = !!req.session.topupData;
+
+  console.log('Generating QR Code for amount:', paymentAmount, 'Topup:', isTopup);
   try {
     const requestBody = {
       txn_id: "sandbox_nets|m|8ff8e5b6-d43e-4786-8ac5-7accf8c5bd9b", // Default for testing
-      amt_in_dollars: cartTotal,
+      amt_in_dollars: paymentAmount,
       notify_mobile: 0,
     };
 
@@ -61,9 +65,10 @@ exports.generateQrCode = async (req, res) => {
       console.log("webhookUrl:" + webhookUrl);
 
       
-      // Render the QR code page with required data
-      res.render("netsQr", {
-        total: cartTotal,
+      // Render the appropriate QR code page
+      const template = isTopup ? 'netsQr' : 'netsQr'; // Both use same template
+      res.render(template, {
+        total: paymentAmount,
         title: "Scan to Pay",
         qrCodeUrl: `data:image/png;base64,${qrData.qr_code}`,
         txnRetrievalRef: txnRetrievalRef,
@@ -74,6 +79,7 @@ exports.generateQrCode = async (req, res) => {
          fullNetsResponse: response.data,
         apiKey: process.env.API_KEY,
         projectId: process.env.PROJECT_ID,
+        isTopup: isTopup
       });
     } else {
       // Handle partial or failed responses
@@ -82,18 +88,22 @@ exports.generateQrCode = async (req, res) => {
         errorMsg =
           qrData.error_message || "Transaction failed. Please try again.";
       }
+      const backUrl = isTopup ? '/ewallet/topup' : '/checkout';
       res.render("netsTxnFailStatus", {
         title: "Error",
         responseCode: qrData.response_code || "N.A.",
         instructions: qrData.instruction || "",
         errorMsg: errorMsg,
+        backUrl: backUrl
       });
     }
   } catch (error) {
     console.error("Error in generateQrCode:", error.message);
+    const backUrl = req.session.topupData ? '/ewallet/topup' : '/checkout';
     res.render("netsTxnFailStatus", {
       errorMsg: "Failed to generate QR code. Please try again or use another payment method.",
-      responseCode: "QR_GENERATION_ERROR"
+      responseCode: "QR_GENERATION_ERROR",
+      backUrl: backUrl
     });
   }
 };

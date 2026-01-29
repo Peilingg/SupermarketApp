@@ -123,7 +123,7 @@
         <div class="mb-3 summary-box">
           <h6>Payment</h6>
           <% 
-            const methods = paymentMethods || ['Credit/Debit card', 'Contactless payment (Apple Pay)', 'E-Wallet', 'PayPal', 'NETS QR'];
+            const methods = paymentMethods || ['Credit/Debit card', 'E-Wallet', 'PayPal', 'NETS QR'];
             const selectedMethod = paymentMethod || methods[0];
           %>
           <% if (!invoice) { %>
@@ -138,6 +138,47 @@
                     <% if (m === 'NETS QR') { %><small class="text-muted">Scan QR code with your bank app</small><% } %>
                   </div>
                 </label>
+                
+                <!-- Credit/Debit Card Details Section - shown after Credit/Debit card option -->
+                <% if (m === 'Credit/Debit card') { %>
+                  <div id="card-details-section" class="list-group-item" style="display: none; padding: 0; border: none; background: transparent;">
+                    <div class="card bg-light border ms-4 me-2 mb-2">
+                      <div class="card-body">
+                        <h6 class="card-title">Card Details</h6>
+                        
+                        <div class="mb-2">
+                          <label for="cardholderName" class="form-label small">Cardholder Name</label>
+                          <input type="text" class="form-control form-control-sm" id="cardholderName" name="cardholderName" form="confirm-form" placeholder="John Doe">
+                        </div>
+
+                        <div class="mb-2">
+                          <label for="cardNumber" class="form-label small">Card Number</label>
+                          <input type="text" class="form-control form-control-sm" id="cardNumber" name="cardNumber" form="confirm-form" placeholder="1234 5678 9012 3456" maxlength="19">
+                          <small class="text-muted">16 digits</small>
+                        </div>
+
+                        <div class="row">
+                          <div class="col-6">
+                            <label for="expiryDate" class="form-label small">Expiry Date</label>
+                            <input type="text" class="form-control form-control-sm" id="expiryDate" name="expiryDate" form="confirm-form" placeholder="MM/YY" maxlength="5">
+                          </div>
+                          <div class="col-6">
+                            <label for="cvv" class="form-label small">CVV</label>
+                            <input type="password" class="form-control form-control-sm" id="cvv" name="cvv" form="confirm-form" placeholder="123" maxlength="4">
+                            <small class="text-muted">3-4 digits</small>
+                          </div>
+                        </div>
+
+                        <div class="form-check mt-2">
+                          <input class="form-check-input" type="checkbox" id="saveCard" name="saveCard" form="confirm-form">
+                          <label class="form-check-label" for="saveCard">
+                            <small>Save this card for future purchases</small>
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                <% } %>
               <% }); %>
             </div>
           <% } else { %>
@@ -165,40 +206,35 @@
               <td class="text-end" id="shipping-amount">$<%= Number(typeof shipping !== 'undefined' ? shipping : 0).toFixed(2) %></td>
             </tr>
             <% if (!invoice) { %>
-              <% 
-                const userStoreCredit = Number(user && user.store_credit ? user.store_credit : 0);
-                const userEwallet = Number(user && user.ewallet_balance ? user.ewallet_balance : 0);
-              %>
-              <% if (userEwallet > 0) { %>
+              <!-- Voucher Dropdown Section -->
+              <% if (claimedVouchers && claimedVouchers.length > 0) { %>
                 <tr>
-                  <th class="text-end">
-                    <div class="form-check form-switch d-inline-flex align-items-center">
-                      <input class="form-check-input me-2" type="checkbox" id="useEwalletToggle" style="cursor: pointer;">
-                      <label class="form-check-label" for="useEwalletToggle" style="cursor: pointer;">Use E-Wallet</label>
-                    </div>
-                    <div><small class="text-muted">Available: $<%= userEwallet.toFixed(2) %></small></div>
-                  </th>
-                  <th class="text-end text-success" id="ewallet-discount" style="display: none;">- $<span id="ewallet-amount">0.00</span></th>
-                </tr>
-              <% } %>
-              <% if (userStoreCredit > 0) { %>
-                <% 
-                  // Only show store credit option if there will be remaining balance after using it
-                  const baseTotal = subtotalVal + taxVal + shippingVal - voucherDiscountVal;
-                  const remainingAfterStoreCredit = Math.max(0, baseTotal - userStoreCredit);
-                %>
-                <% if (remainingAfterStoreCredit > 0) { %>
-                  <tr>
-                    <th class="text-end">
-                      <div class="form-check form-switch d-inline-flex align-items-center">
-                        <input class="form-check-input me-2" type="checkbox" id="useStoreCreditToggle" style="cursor: pointer;">
-                        <label class="form-check-label" for="useStoreCreditToggle" style="cursor: pointer;">Use Store Credit</label>
+                  <td colspan="2" class="p-0">
+                    <div class="card mb-0 border-0">
+                      <div class="card-body py-2">
+                        <label for="voucherSelect" class="form-label mb-1 small fw-semibold">Select a voucher:</label>
+                        <select id="voucherSelect" class="form-select form-select-sm">
+                          <option value="">-- No Voucher --</option>
+                          <% claimedVouchers.forEach(function(v) { %>
+                            <option value="<%= v.code %>" 
+                              data-discount="<%= v.discountValue %>"
+                              data-type="<%= v.discountType %>"
+                              data-min-spend="<%= v.minSpend %>"
+                              <%= (voucher && voucher.code === v.code) ? 'selected' : '' %>>
+                              <%= v.code %> - <%= v.description || '' %>
+                              <% if (v.discountType === 'percent') { %>
+                                (<%= v.discountValue %>% off)
+                              <% } else { %>
+                                (-$<%= Number(v.discountValue).toFixed(2) %>)
+                              <% } %>
+                            </option>
+                          <% }); %>
+                        </select>
+                        <small class="text-muted d-block mt-1">Voucher applies automatically when selected</small>
                       </div>
-                      <div><small class="text-muted">Available: $<%= userStoreCredit.toFixed(2) %></small></div>
-                    </th>
-                    <th class="text-end text-success" id="store-credit-discount" style="display: none;">- $<span id="store-credit-amount">0.00</span></th>
-                  </tr>
-                <% } %>
+                    </div>
+                  </td>
+                </tr>
               <% } %>
             <% } %>
             <% if (voucher) { %>
@@ -206,6 +242,23 @@
                 <th class="text-end">Voucher (<%= voucher.code %>)</th>
                 <th class="text-end text-success">- $<%= Number(typeof voucherDiscount !== 'undefined' ? voucherDiscount : 0).toFixed(2) %></th>
               </tr>
+            <% } %>
+            <% if (!invoice) { %>
+              <% 
+                const userStoreCredit = Number(user && user.store_credit ? user.store_credit : 0);
+              %>
+              <% if (userStoreCredit > 0) { %>
+                <tr>
+                  <th class="text-end">
+                    <div class="form-check form-switch d-inline-flex align-items-center">
+                      <input class="form-check-input me-2" type="checkbox" id="useStoreCreditToggle" style="cursor: pointer;">
+                      <label class="form-check-label" for="useStoreCreditToggle" style="cursor: pointer;">Use Store Credit</label>
+                    </div>
+                    <div><small class="text-muted">Available: $<%= userStoreCredit.toFixed(2) %></small></div>
+                  </th>
+                  <th class="text-end text-success" id="store-credit-discount" style="display: none;">- $<span id="store-credit-amount">0.00</span></th>
+                </tr>
+              <% } %>
             <% } %>
             <tr class="table-active">
               <th class="text-end">Total</th>
@@ -215,10 +268,11 @@
         </table>
 
         <% if (!invoice) { %>
-          <div class="mb-2">
+          <div class="mb-3">
             <% if (voucher && voucherDiscount === 0 && voucherReason) { %>
               <div class="alert alert-warning py-2 mb-2">Voucher applied but not eligible: <%= voucherReason %>.</div>
             <% } %>
+            
             <a href="/vouchers" class="btn btn-outline-primary w-100 mb-2">Manage vouchers</a>
           </div>
           <div id="paypal-button-container" style="display: none; margin-bottom: 10px;"></div>
@@ -229,8 +283,6 @@
             <% } %>
             <input type="hidden" name="useStoreCredit" id="useStoreCreditInput" value="false">
             <input type="hidden" name="storeCreditUsed" id="storeCreditUsedInput" value="0">
-            <input type="hidden" name="useEwallet" id="useEwalletInput" value="false">
-            <input type="hidden" name="ewalletUsed" id="ewalletUsedInput" value="0">
             <button type="submit" id="confirm-pay-btn" class="btn btn-success w-100">Confirm & Pay</button>
           </form>
           <a href="/cart" class="btn btn-outline-secondary w-100 mt-2">Edit Cart</a>
@@ -268,21 +320,38 @@
       const shippingVal = <%= (typeof shipping !== 'undefined' ? shipping : 0) %>;
       const voucherDiscountVal = <%= (typeof voucherDiscount !== 'undefined' ? voucherDiscount : 0) %>;
       const availableStoreCredit = <%= (user && user.store_credit ? user.store_credit : 0) %>;
-      const availableEwallet = <%= (user && user.ewallet_balance ? user.ewallet_balance : 0) %>;
+      const voucherTooLarge = <%= (typeof voucherTooLarge !== 'undefined' && voucherTooLarge) ? 'true' : 'false' %>;
+      let voucherAlertShown = false;
+
+      function blockIfVoucherTooLarge() {
+        const currentTotalBeforeVoucher = subtotalVal + taxVal + shippingVal;
+        if (voucherTooLarge || voucherDiscountVal > currentTotalBeforeVoucher) {
+          if (!voucherAlertShown) {
+            alert('Voucher value exceeds your order total. Please add more items before using this voucher.');
+            voucherAlertShown = true;
+          }
+          const confirmBtn = document.getElementById('confirm-pay-btn');
+          const paypalContainer = document.getElementById('paypal-button-container');
+          if (confirmBtn) {
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Add more items to proceed';
+          }
+          if (paypalContainer) {
+            paypalContainer.style.display = 'none';
+          }
+          return true;
+        }
+        return false;
+      }
 
       function recomputeTotals() {
         const baseTotal = subtotalVal + taxVal + shippingVal - voucherDiscountVal;
         let creditToUse = 0;
-        let ewalletToUse = 0;
 
         if (storeCreditToggle && storeCreditToggle.checked) {
           creditToUse = Math.min(availableStoreCredit, baseTotal);
         }
-        let remaining = Math.max(0, baseTotal - creditToUse);
-        if (ewalletToggle && ewalletToggle.checked) {
-          ewalletToUse = Math.min(availableEwallet, remaining);
-        }
-        const newTotal = Math.max(0, remaining - ewalletToUse);
+        const newTotal = Math.max(0, baseTotal - creditToUse);
 
         if (storeCreditToggle) {
           storeCreditAmountSpan.textContent = creditToUse.toFixed(2);
@@ -290,20 +359,15 @@
           useStoreCreditInput.value = creditToUse > 0 ? 'true' : 'false';
           storeCreditUsedInput.value = creditToUse.toFixed(2);
         }
-        if (ewalletToggle) {
-          ewalletAmountSpan.textContent = ewalletToUse.toFixed(2);
-          ewalletDiscountRow.style.display = ewalletToUse > 0 ? '' : 'none';
-          useEwalletInput.value = ewalletToUse > 0 ? 'true' : 'false';
-          ewalletUsedInput.value = ewalletToUse.toFixed(2);
-        }
 
         totalAmountEl.textContent = '$' + newTotal.toFixed(2);
+        blockIfVoucherTooLarge();
       }
 
       if (storeCreditToggle) storeCreditToggle.addEventListener('change', recomputeTotals);
-      if (ewalletToggle) ewalletToggle.addEventListener('change', recomputeTotals);
       // Initial compute
       recomputeTotals();
+      blockIfVoucherTooLarge();
 
       // Handle payment method selection
       function updatePaymentUI() {
@@ -324,9 +388,322 @@
         }
       }
 
-      radios.forEach(r => {
+      // ==================== E-Wallet Modal Handler ====================
+      let ewalletModal;
+      function showEwalletModal() {
+        if (!ewalletModal) {
+          ewalletModal = new bootstrap.Modal(document.getElementById('ewalletModal'));
+        }
+        
+        // Update amount display
+        const totalAmount = document.getElementById('total-amount').textContent.replace('$', '').trim();
+        document.getElementById('ewallet-amount').textContent = '$' + parseFloat(totalAmount).toFixed(2);
+        
+        ewalletModal.show();
+      }
+
+      // E-Wallet confirm button handler
+      const ewalletConfirmBtn = document.getElementById('ewallet-confirm-btn');
+      if (ewalletConfirmBtn) {
+        ewalletConfirmBtn.addEventListener('click', function() {
+          ewalletConfirmBtn.disabled = true;
+          ewalletConfirmBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Processing...';
+          
+          fetch('/checkout/confirm-ewallet', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+          })
+          .then(response => response.json())
+          .then(data => {
+            if (data.success) {
+              if (ewalletModal) ewalletModal.hide();
+              
+              // Show success message
+              const successAlert = document.createElement('div');
+              successAlert.className = 'alert alert-success alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3';
+              successAlert.style.zIndex = '2000';
+              successAlert.innerHTML = `
+                <strong>✓ Payment Successful!</strong> Your E-Wallet payment has been processed.
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+              `;
+              document.body.appendChild(successAlert);
+              
+              // Redirect after 2 seconds
+              setTimeout(() => {
+                window.location.href = data.redirect;
+              }, 2000);
+            } else {
+              alert('Payment failed: ' + (data.error || 'Unknown error'));
+              ewalletConfirmBtn.disabled = false;
+              ewalletConfirmBtn.innerHTML = 'Confirm Payment';
+            }
+          })
+          .catch(error => {
+            console.error('Error:', error);
+            alert('Error processing payment: ' + error.message);
+            ewalletConfirmBtn.disabled = false;
+            ewalletConfirmBtn.innerHTML = 'Confirm Payment';
+          });
+        });
+      }
+
+      // ==================== NETS QR Modal Handler ====================
+      let netsqrModal;
+      function showNetsQrModal() {
+        if (!netsqrModal) {
+          netsqrModal = new bootstrap.Modal(document.getElementById('netsqrModal'));
+        }
+        
+        netsqrModal.show();
+        generateNetsQrCode();
+      }
+
+      function generateNetsQrCode() {
+        const totalAmount = document.getElementById('total-amount').textContent.replace('$', '').trim();
+        const amount = parseFloat(totalAmount);
+        
+        fetch('/api/nets/checkout/qr-code', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ amount: amount })
+        })
+        .then(response => response.json())
+        .then(data => {
+          if (data.success && data.qrCode) {
+            displayNetsQrCode(data, amount);
+          } else {
+            document.getElementById('netsqr-container').innerHTML = '<div style="color: #dc3545; text-align: center;"><p>Failed to generate QR code: ' + (data.error || 'Unknown error') + '</p></div>';
+          }
+        })
+        .catch(error => {
+          console.error('Error:', error);
+          document.getElementById('netsqr-container').innerHTML = '<div style="color: #dc3545; text-align: center;"><p>Failed to generate QR code: ' + error.message + '</p></div>';
+        });
+      }
+
+      function displayNetsQrCode(data, amount) {
+        let html = '<div style="text-align: center;">';
+        html += '<div style="display: inline-block; background: #ffc107; color: #000; padding: 8px 16px; border-radius: 20px; font-weight: bold; margin-bottom: 20px;">Time remaining: <span id="netsqr-timer">300</span>s</div><br>';
+        html += '<img src="data:image/png;base64,' + data.qrCode + '" alt="NETS QR Code" style="max-width: 300px; height: auto; margin: 20px 0;">';
+        html += '<p style="color: #666; margin-top: 20px;">Open your NETS app and scan this code to complete the payment.</p>';
+        html += '</div>';
+        
+        document.getElementById('netsqr-container').innerHTML = html;
+        
+        // Start countdown timer
+        startNetsQrTimer(300, data.txnRetrievalRef);
+        
+        // Poll for payment confirmation
+        pollNetsPaymentStatus(data.txnRetrievalRef);
+      }
+
+      function startNetsQrTimer(seconds, txnRef) {
+        let remaining = seconds;
+        const timerElement = document.getElementById('netsqr-timer');
+        
+        const interval = setInterval(() => {
+          remaining--;
+          if (timerElement) {
+            timerElement.textContent = remaining;
+          }
+          
+          if (remaining <= 0) {
+            clearInterval(interval);
+            document.getElementById('netsqr-container').innerHTML = '<div style="color: #dc3545; text-align: center;"><p>QR code has expired. Please try again.</p></div>';
+            if (netsqrModal) netsqrModal.hide();
+          }
+        }, 1000);
+      }
+
+      function pollNetsPaymentStatus(txnRetrievalRef) {
+        const maxAttempts = 600; // 10 minutes with 1-second intervals
+        let attempts = 0;
+
+        const pollInterval = setInterval(() => {
+          attempts++;
+          
+          fetch('/api/nets/checkout/check-payment', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ txnRetrievalRef: txnRetrievalRef })
+          })
+          .then(response => response.json())
+          .then(data => {
+            if (data.completed) {
+              clearInterval(pollInterval);
+              
+              // Payment successful - complete the checkout
+              fetch('/checkout/confirm-nets-qr', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+              })
+              .then(response => response.json())
+              .then(confirmData => {
+                if (confirmData.success) {
+                  if (netsqrModal) netsqrModal.hide();
+                  
+                  // Show success message
+                  const successAlert = document.createElement('div');
+                  successAlert.className = 'alert alert-success alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3';
+                  successAlert.style.zIndex = '2000';
+                  successAlert.innerHTML = `
+                    <strong>✓ Payment Successful!</strong> Your NETS QR payment has been processed.
+                    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                  `;
+                  document.body.appendChild(successAlert);
+                  
+                  // Redirect after 2 seconds
+                  setTimeout(() => {
+                    window.location.href = confirmData.redirect;
+                  }, 2000);
+                } else {
+                  alert('Failed to complete order: ' + (confirmData.error || 'Unknown error'));
+                }
+              })
+              .catch(error => {
+                console.error('Error completing order:', error);
+                alert('Error completing order: ' + error.message);
+              });
+            } else if (attempts >= maxAttempts) {
+              clearInterval(pollInterval);
+              document.getElementById('netsqr-container').innerHTML = '<div style="color: #dc3545; text-align: center;"><p>Payment timeout. Please check your NETS app or try again.</p></div>';
+            }
+          })
+          .catch(error => {
+            console.error('Polling error:', error);
+            // Continue polling even on error
+          });
+        }, 1000);
+      }
+
+      console.log('Setting up payment radio listeners. Found', radios.length, 'radios');
+      radios.forEach((r, idx) => {
+        console.log('Radio', idx, ':', r.value, 'checked:', r.checked);
         r.addEventListener('change', updatePaymentUI);
+        // Also toggle card details
+        r.addEventListener('change', function() {
+          console.log('Card toggle event - selected value:', this.value);
+          const cardSection = document.getElementById('card-details-section');
+          console.log('Card section element found:', !!cardSection);
+          if (cardSection) {
+            const shouldShow = this.value === 'Credit/Debit card';
+            console.log('Setting card section display to:', shouldShow ? 'block' : 'none');
+            cardSection.style.display = shouldShow ? 'block' : 'none';
+          }
+        });
       });
+
+      // ===== CREDIT/DEBIT CARD HANDLING =====
+      const initialCardSection = document.getElementById('card-details-section');
+      console.log('Initial card section element found:', !!initialCardSection);
+      if (initialCardSection) {
+        const selectedRadio = document.querySelector('input[name="paymentMethod"]:checked');
+        console.log('Initial selected radio:', selectedRadio ? selectedRadio.value : 'none');
+        if (selectedRadio && selectedRadio.value === 'Credit/Debit card') {
+          console.log('Showing card section on page load');
+          initialCardSection.style.display = 'block';
+        } else {
+          console.log('Hiding card section on page load');
+          initialCardSection.style.display = 'none';
+        }
+      }
+
+      // Card number formatting
+      const cardNumberField = document.getElementById('cardNumber');
+      if (cardNumberField) {
+        cardNumberField.addEventListener('input', function(e) {
+          let value = e.target.value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
+          let formatted = value.replace(/(\d{4})/g, '$1 ').trim();
+          e.target.value = formatted.substring(0, 19);
+        });
+      }
+
+      // Expiry date formatting
+      const expiryField = document.getElementById('expiryDate');
+      if (expiryField) {
+        expiryField.addEventListener('input', function(e) {
+          let value = e.target.value.replace(/\D/g, '');
+          if (value.length >= 2) {
+            value = value.substring(0, 2) + '/' + value.substring(2, 4);
+          }
+          e.target.value = value.substring(0, 5);
+        });
+      }
+
+      // CVV formatting (numbers only)
+      const cvvField = document.getElementById('cvv');
+      if (cvvField) {
+        cvvField.addEventListener('input', function(e) {
+          e.target.value = e.target.value.replace(/\D/g, '').substring(0, 4);
+        });
+      }
+
+      // Validate card before form submission
+      if (confirmForm) {
+        confirmForm.addEventListener('submit', function(e) {
+          const selectedRadio = document.querySelector('input[name="paymentMethod"]:checked');
+          
+          if (selectedRadio && selectedRadio.value === 'Credit/Debit card') {
+            const cardholderName = document.getElementById('cardholderName');
+            const cardNumber = document.getElementById('cardNumber');
+            const expiryDate = document.getElementById('expiryDate');
+            const cvv = document.getElementById('cvv');
+
+            // Validate cardholder name
+            if (!cardholderName || !cardholderName.value.trim()) {
+              alert('Please enter cardholder name');
+              if (cardholderName) cardholderName.focus();
+              e.preventDefault();
+              return false;
+            }
+
+            // Validate card number
+            if (!cardNumber) {
+              alert('Card number field not found');
+              e.preventDefault();
+              return false;
+            }
+            const cardNum = cardNumber.value.replace(/\s+/g, '');
+            if (cardNum.length !== 16 || !/^\d{16}$/.test(cardNum)) {
+              alert('Please enter a valid 16-digit card number');
+              cardNumber.focus();
+              e.preventDefault();
+              return false;
+            }
+
+            // Validate expiry date
+            if (!expiryDate || !expiryDate.value.match(/^\d{2}\/\d{2}$/)) {
+              alert('Please enter expiry date in MM/YY format');
+              if (expiryDate) expiryDate.focus();
+              e.preventDefault();
+              return false;
+            }
+
+            // Check expiry not in past
+            const [month, year] = expiryDate.value.split('/');
+            const now = new Date();
+            const currentYear = now.getFullYear() % 100;
+            const currentMonth = now.getMonth() + 1;
+            
+            if (parseInt(year) < currentYear || (parseInt(year) === currentYear && parseInt(month) < currentMonth)) {
+              alert('Card has expired. Please use a valid card.');
+              expiryDate.focus();
+              e.preventDefault();
+              return false;
+            }
+
+            // Validate CVV
+            if (!cvv || !/^\d{3,4}$/.test(cvv.value)) {
+              alert('Please enter a valid CVV (3-4 digits)');
+              if (cvv) cvv.focus();
+              e.preventDefault();
+              return false;
+            }
+          }
+        });
+      }
 
       // Initialize PayPal buttons
       if (typeof paypal !== 'undefined') {
@@ -383,8 +760,7 @@
             .then(details => {
               if (details.success) {
                 // Payment successful - redirect to invoice
-                alert('Payment successful! Order ID: ' + details.purchaseId);
-                window.location.href = '/purchases';
+                window.location.href = '/purchases/' + details.purchaseId + '/invoice';
               } else {
                 alert('Payment failed: ' + (details.error || 'Unknown error'));
                 window.location.reload();
@@ -404,6 +780,69 @@
 
       // Initialize UI based on current selection
       updatePaymentUI();
+
+      // ===== VOUCHER DROPDOWN FUNCTIONALITY =====
+      const voucherSelect = document.getElementById('voucherSelect');
+
+      if (voucherSelect) {
+        voucherSelect.addEventListener('change', function() {
+          const selectedCode = voucherSelect.value;
+
+          if (!selectedCode) {
+            // Remove voucher using form submission
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/vouchers/clear';
+            document.body.appendChild(form);
+            form.submit();
+            return;
+          }
+
+          // Get selected voucher details
+          const selectedOption = voucherSelect.options[voucherSelect.selectedIndex];
+          const discountValue = parseFloat(selectedOption.getAttribute('data-discount') || 0);
+          const discountType = selectedOption.getAttribute('data-type') || 'amount';
+          const minSpend = parseFloat(selectedOption.getAttribute('data-min-spend') || 0);
+
+          // Calculate current total (before ANY voucher is applied)
+          const currentTotal = subtotalVal + taxVal + shippingVal;
+
+          // Calculate voucher discount
+          let voucherDiscount = 0;
+          if (discountType === 'percent') {
+            voucherDiscount = subtotalVal * (discountValue / 100);
+          } else {
+            voucherDiscount = discountValue;
+          }
+
+          // Check if total amount is less than voucher value
+          // Compare against pre-voucher total to allow switching vouchers
+          if (voucherDiscount >= currentTotal) {
+            alert('Unable to use this voucher. The voucher value ($' + voucherDiscount.toFixed(2) + ') is greater than or equal to your order total ($' + currentTotal.toFixed(2) + '). Please add more items to your cart or choose a different voucher.');
+            return;
+          }
+
+          // Check minimum spend
+          if (minSpend > subtotalVal) {
+            alert('Unable to use this voucher. Minimum spend of $' + minSpend.toFixed(2) + ' is required. Your subtotal is $' + subtotalVal.toFixed(2) + '.');
+            return;
+          }
+
+          // Apply selected voucher using form submission to properly handle redirects
+          const form = document.createElement('form');
+          form.method = 'POST';
+          form.action = '/vouchers/apply';
+          
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = 'code';
+          input.value = selectedCode;
+          
+          form.appendChild(input);
+          document.body.appendChild(form);
+          form.submit();
+        });
+      }
     });
   </script>
   <% } %>

@@ -138,6 +138,13 @@ const EWallet = {
         const txnSql = 'INSERT INTO points_transactions (userId, pointsAmount, transactionType, description) VALUES (?, ?, ?, ?)';
         db.query(txnSql, [userId, points, 'redeemed', `${points} points converted to $${creditAmount} store credit`], function(txnErr) {
           if (txnErr) console.error('Failed to record conversion:', txnErr);
+          
+          // Also log store credit addition
+          const creditTxnSql = 'INSERT INTO points_transactions (userId, pointsAmount, transactionType, description) VALUES (?, ?, ?, ?)';
+          db.query(creditTxnSql, [userId, parseFloat(creditAmount), 'store_credit_added', `Converted ${points} points to $${creditAmount} store credit`], function(creditTxnErr) {
+            if (creditTxnErr) console.error('Failed to record store credit addition:', creditTxnErr);
+          });
+          
           return callback(err, { creditAmount, pointsSpent: points });
         });
       });
@@ -158,6 +165,24 @@ const EWallet = {
     const sql = 'UPDATE ewallet_transactions SET status = ? WHERE transactionId = ?';
     db.query(sql, [status, transactionId], function(err, result) {
       return callback(err, result);
+    });
+  },
+
+  // Log store credit transaction
+  logStoreCreditTransaction: function(userId, amount, transactionType, description, callback) {
+    const sql = 'INSERT INTO points_transactions (userId, pointsAmount, transactionType, description) VALUES (?, ?, ?, ?)';
+    db.query(sql, [userId, amount, transactionType, description], function(err, result) {
+      if (callback) return callback(err, result);
+    });
+  },
+
+  // Get store credit transactions
+  getStoreCreditTransactions: function(userId, limit, callback) {
+    const sql = `SELECT * FROM points_transactions 
+                 WHERE userId = ? AND transactionType IN ('store_credit_used', 'store_credit_added') 
+                 ORDER BY createdAt DESC LIMIT ?`;
+    db.query(sql, [userId, limit], function(err, results) {
+      return callback(err, results);
     });
   }
 };

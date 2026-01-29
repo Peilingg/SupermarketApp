@@ -37,9 +37,9 @@ const UserVoucher = {
     db.query(sql, [userId, code], (err, rows) => callback(err, rows && rows[0] ? rows[0] : null));
   },
 
-  // Mark used
+  // Mark used (keep status as 'claimed' so voucher can be reused)
   markUsed: function(userVoucherId, callback) {
-    db.query('UPDATE user_vouchers SET status = ?, used_at = NOW() WHERE userVoucherId = ?', ['used', userVoucherId], (err, result) => callback(err, result));
+    db.query('UPDATE user_vouchers SET used_at = NOW() WHERE userVoucherId = ?', [userVoucherId], (err, result) => callback(err, result));
   }
 };
 

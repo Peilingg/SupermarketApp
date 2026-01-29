@@ -139,13 +139,19 @@ const RefundController = {
 
     const refundId = req.params.refundId || req.body.refundId;
     const adminNotes = req.body.adminNotes || '';
+    const customRefundAmount = req.body.refundAmount ? parseFloat(req.body.refundAmount) : null;
 
     if (!refundId) {
       req.flash && req.flash('error', 'Refund ID is required.');
       return res.redirect('/managerefunds');
     }
 
-    RefundRequest.approve(refundId, adminNotes, function(err, result) {
+    if (!customRefundAmount || customRefundAmount <= 0) {
+      req.flash && req.flash('error', 'Invalid refund amount. Please enter a valid amount.');
+      return res.redirect('/refund/' + refundId);
+    }
+
+    RefundRequest.approve(refundId, adminNotes, customRefundAmount, function(err, result) {
       if (err) {
         console.error('RefundController.approve error:', err);
         req.flash && req.flash('error', 'Failed to approve refund: ' + (err.message || 'Unknown error'));
