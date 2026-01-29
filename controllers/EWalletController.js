@@ -92,8 +92,13 @@ const EWalletController = {
       return res.redirect('/ewallet/topup');
     }
 
-    if (topupAmount > 10000) {
-      req.flash && req.flash('error', 'Maximum top-up amount is $10,000');
+    if (topupAmount < 10) {
+      req.flash && req.flash('error', 'Minimum top-up amount is $10');
+      return res.redirect('/ewallet/topup');
+    }
+
+    if (topupAmount > 3000) {
+      req.flash && req.flash('error', 'Maximum top-up amount is $3,000');
       return res.redirect('/ewallet/topup');
     }
 

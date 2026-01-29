@@ -23,6 +23,12 @@ const paypalService = require('./services/paypal');
 // Load environment variables
 dotenv.config();
 
+// Payment amount limits (checkout totals)
+const PAYMENT_LIMITS = {
+  MIN: 1.00,
+  MAX: 3000.00
+};
+
 // Verify PayPal configuration
 if (process.env.PAYPAL_CLIENT_ID && process.env.PAYPAL_CLIENT_SECRET && process.env.PAYPAL_API) {
   console.log('✓ PayPal service configured');
@@ -568,6 +574,12 @@ app.post('/checkout/confirm', checkAuthenticated, async (req, res) => {
 
     const baseTotal = +(subtotal + tax + shipping - voucherDiscount).toFixed(2);
 
+    // Enforce payment amount limits on order total
+    if (baseTotal > 0 && (baseTotal < PAYMENT_LIMITS.MIN || baseTotal > PAYMENT_LIMITS.MAX)) {
+      req.flash && req.flash('error', `Payment amount must be between $${PAYMENT_LIMITS.MIN.toFixed(2)} and $${PAYMENT_LIMITS.MAX.toFixed(2)}.`);
+      return res.redirect('/checkout');
+    }
+
     // Validate store credit amount server-side
     let validatedStoreCreditUsed = 0;
     await new Promise((resolve) => {
@@ -840,6 +852,11 @@ app.post('/api/paypal/create-order', checkAuthenticated, async (req, res) => {
     console.log('Create PayPal Order - Received:', { amount: amountNum, storeCreditUsed: storeCreditNum, ewalletUsed: ewalletNum });
     console.log('Session checkoutData:', req.session.checkoutData);
     
+    // Enforce payment amount limits
+    if (amountNum > 0 && (amountNum < PAYMENT_LIMITS.MIN || amountNum > PAYMENT_LIMITS.MAX)) {
+      return res.status(400).json({ error: `Payment amount must be between $${PAYMENT_LIMITS.MIN.toFixed(2)} and $${PAYMENT_LIMITS.MAX.toFixed(2)}.` });
+    }
+
     // Validate amount matches session data or recalculate
     if (req.session.checkoutData) {
       const { subtotal, tax, shipping, voucherDiscount, voucherTooLarge } = req.session.checkoutData;
@@ -1623,6 +1640,13 @@ app.post('/api/nets/checkout/qr-code', checkAuthenticated, async (req, res) => {
     return res.status(400).json({ success: false, error: 'Invalid amount' });
   }
 
+  if (amount < PAYMENT_LIMITS.MIN || amount > PAYMENT_LIMITS.MAX) {
+    return res.status(400).json({
+      success: false,
+      error: `Payment amount must be between $${PAYMENT_LIMITS.MIN.toFixed(2)} and $${PAYMENT_LIMITS.MAX.toFixed(2)}.`
+    });
+  }
+
   try {
     const requestBody = {
       txn_id: "sandbox_nets|m|8ff8e5b6-d43e-4786-8ac5-7accf8c5bd9b",
@@ -1727,6 +1751,14 @@ app.post('/checkout/confirm-ewallet', checkAuthenticated, (req, res) => {
   }
 
   const { items, subtotal, tax, shipping, total, appliedVoucher, voucherDiscount, storeCreditUsed, ewalletUsed, paymentMethod } = checkoutData;
+
+  const baseTotal = +(Number(subtotal || 0) + Number(tax || 0) + Number(shipping || 0) - Number(voucherDiscount || 0)).toFixed(2);
+  if (baseTotal > 0 && (baseTotal < PAYMENT_LIMITS.MIN || baseTotal > PAYMENT_LIMITS.MAX)) {
+    return res.status(400).json({
+      success: false,
+      error: `Payment amount must be between $${PAYMENT_LIMITS.MIN.toFixed(2)} and $${PAYMENT_LIMITS.MAX.toFixed(2)}.`
+    });
+  }
 
   // Record purchase
   const summary = {
